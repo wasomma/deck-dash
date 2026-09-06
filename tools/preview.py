@@ -1,6 +1,6 @@
 """Render the board and every zoom view with live data into sim/*.png (no hardware needed).
 
-Usage:  .venv\\Scripts\\python tools\\preview.py [--wait SECONDS]
+Usage:  .venv\\Scripts\\python tools\\preview.py [--wait SECONDS] [--gap PX]
 """
 
 from __future__ import annotations
@@ -38,16 +38,17 @@ def main() -> int:
     board = out / "board.png"
     deck.write().replace(board)
     print(f"wrote {board}")
-    for idx, tile in enumerate(app.slots):
-        if tile is None or not tile.zoomable:
+    for tile in app.tiles:
+        if not tile.zoomable:
             continue
-        app._on_press(idx, True)
+        app._on_press(tile.slot, True)
         app.tick()
         deck.flush(10.0)
         target = out / f"zoom-{tile.name}.png"
         deck.write().replace(target)
         print(f"wrote {target}")
-        app._on_press(idx, True)  # back to the board
+        app.zoom = None  # back to the board without triggering the zoom-press hook
+        app._invalidate()
         app.tick()
         deck.flush(10.0)
     app.stop()

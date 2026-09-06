@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from .base import Tile
+from .bitaxe import BitaxeTile
+from .bsod import BsodTile
+from .ci import CiTile
 from .clock import ClockTile
 from .cpu import CpuTile
 from .gpu import GpuTile
 from .net import NetTile
+from .news import NewsTile
+from .vps import VpsTile
 from .weather import ForecastTile, WeatherNowTile
 
 TILES: dict[str, type[Tile]] = {
@@ -14,6 +19,11 @@ TILES: dict[str, type[Tile]] = {
     "gpu": GpuTile,
     "cpu": CpuTile,
     "net": NetTile,
+    "bitaxe": BitaxeTile,
+    "ci": CiTile,
+    "vps": VpsTile,
+    "bsod": BsodTile,
+    "news": NewsTile,
 }
 
 

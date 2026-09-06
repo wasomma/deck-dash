@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Example feed</title>
+<item><title>First headline &amp; some &lt;b&gt;markup&lt;/b&gt;</title><link>https://example.com/1</link><pubDate>Sun, 06 Sep 2026 20:32:38 +0000</pubDate></item>
+<item><title>  Second   headline with   odd spacing </title><link>https://example.com/2</link><pubDate>Sun, 06 Sep 2026 19:00:00 +0000</pubDate></item>
+<item><title>No link item</title></item>
+<item><title>Third</title><link>https://example.com/3</link></item>
+</channel></rss>

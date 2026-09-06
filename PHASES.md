@@ -8,6 +8,7 @@ A fresh session resumes from this file.
 - Elgato software not installed; nothing else holds the device.
 - Stack: Python 3.13 venv in `.venv`, python-elgato-streamdeck 0.10.0, Pillow 12.3, numpy, psutil, nvidia-ml-py, feedparser, requests, pytest.
 - `hidapi.dll` (x64) must live in `C:\Users\WesF\Desktop\Dev\Tools\hidapi\`; `deckdash.device.add_hidapi_dir` registers it with `os.add_dll_directory` before the library imports.
+- Worktree sessions: the venv lives only in the main checkout; run `C:\Users\WesF\Desktop\Dev\Projects\deck-dash\.venv\Scripts\python` from the worktree directory. `config.local.toml` must be copied into the worktree by hand (gitignored).
 
 ## Phase 0 — spike: open the deck and benchmark it
 Status: **done 2026-09-06.** `hidapi.dll` 0.15.0 x64 (166,912 bytes) installed in `Desktop\Dev\Tools\hidapi\` (Wes approved the download).
@@ -27,17 +28,19 @@ realistic, and dirty-key flushing is a nicety rather than a necessity. Phase 3 c
 `anim_fps = 12` for ambient scenes.
 
 ## Phase 1 — core loop + first tiles (simulator-verified)
+Status: **done 2026-09-06**, reviewed on the hardware by Wes ("looks great").
 - [x] `device.py`: dirty-key hashing, per-tick byte budget with round-robin carry-over, reconnect on write failure, `SimDeck` writing `sim/canvas.png` and taking presses from `sim/press.txt`.
 - [x] `sources/`: weather (Open-Meteo, IP-located once, cached to `config.local.toml`), sys (psutil), gpu (NVML), ping.
-- [x] `tiles/`: clock, weather now, 6-hour forecast strip, GPU, CPU, net, each with a full-deck zoom view.
+- [x] `tiles/`: clock, weather now, 5-hour forecast strip, GPU, CPU, net, each with a full-deck zoom view.
 - [x] `app.py`: 10 Hz tick, per-tile refresh, zoom on press with 10 s timeout, night brightness.
-- [x] pytest suite (`tests/`), 39 tests.
-- [x] Simulator-verified 2026-09-06: `tools/preview.py` renders `sim/board.png` and `sim/zoom-*.png` with live data.
-- [ ] Wes eyeballs the physical deck (needs Phase 0).
+- [x] pytest suite (`tests/`).
+- [x] Simulator-verified: `tools/preview.py` renders `sim/board.png` and `sim/zoom-*.png` with live data.
+- [x] Wes eyeballed the physical deck.
 
 Design rule learned from the first zoom renders: **text never straddles a bezel; only graphics
 (lines, fills, bars, big shapes) may span keys.** `Canvas.key_text` enforces it; use it for every
-label in a zoom or ambient view.
+label in a zoom or ambient view. The news marquee is the one deliberate exception (motion carries
+the eye across the gap).
 
 Follow-ups: psutil reports the nominal 3.0 GHz on Windows, so the CPU tile shows RAM instead of a
 clock; a live clock needs the PDH counter `% Processor Performance` (ctypes, no extra package).
@@ -46,8 +49,21 @@ Run: `.venv\Scripts\python -m deckdash --sim --seconds 15` then open `sim/canvas
 previews: `.venv\Scripts\python tools\preview.py`; hardware: `.venv\Scripts\python -m deckdash`.
 
 ## Phase 2 — remaining tiles + zoom + Task Scheduler
-- [ ] Bitaxe (10.0.0.191 `/api/system/info`), CI (`gh run list` / `gh pr list` for fpv-sim x4, drift-duet, guild-mp), VPS health (URLs from the `guild-vps-deploy` skill), BSOD watch (System log 41/1001 + uptime), news ticker (HN, Ars, BBC World; press = 5 headlines; press a headline = open in browser).
-- [ ] Task Scheduler registration script (gate: Wes approves).
+Status: **code done 2026-09-06** (64 tests pass, previews checked, running on the hardware from the
+worktree). The Task Scheduler registration is a gate for Wes (below).
+- [x] Bitaxe tile (`sources/bitaxe.py`, `tiles/bitaxe.py`): AxeOS `/api/system/info` every 10 s; swinging pickaxe while hashing; zoom = live numbers, 10-min hashrate line, shares/uptime/clock/fan/pool. `new_best` flag is kept for the Phase 4 toast.
+- [x] CI board (`sources/ci.py`, `tiles/ci.py`): `gh api` runs + open PRs per repo (six repos, labels in `config.toml`), 2 min / 30 s while running, six repos fetched in parallel; dot per repo, pulsing amber while a run is in progress; zoom = repo cards, a "latest" 2x2 spotlight (failure > running > most recent), open PRs on row 3.
+- [x] VPS health (`sources/vps.py`, `tiles/vps.py`): one SSH round trip per minute (`systemctl is-active` + local curl per service on the box) plus a public HTTPS GET per service for edge latency; ok/degraded/down/unknown; zoom = one row per service with a 30-min latency line. Hosts live only in `config.local.toml`.
+- [x] BSOD watch (`sources/bsod.py`, `tiles/bsod.py`): `wevtutil` query for Kernel-Power 41 + WER 1001, merged into crash records (bugcheck vs power loss); tile = time since last bugcheck, 30-day bugcheck count, last code, uptime, 30-day strip; zoom = counters + last ten events.
+- [x] News ticker (`sources/news.py`, `tiles/news.py`): first wide tile (`width = 5`, `render_span`); marquee at 60 px/s, 10 fps, seamless wrap, new headlines swapped in at the wrap; zoom = five headlines in five columns starting from the one under the window centre; pressing a column opens the story (`webbrowser.open`). App gained `build_slots` (wide tiles) and `on_zoom_press`.
+- [x] `main.py`: named-mutex single instance, `open_with_retry` (deck absent at logon), no stderr handler under `pythonw`.
+- [x] `tools/install_task.ps1` (ASCII, parse-checked): at-logon task for the current user, 20 s delay, restart every minute up to 99 times, unlimited run time, `IgnoreNew`; refuses to register if `hidapi.dll` is not visible; `-Status` / `-Remove`.
+- [ ] **Gate (Wes):** from his own terminal, `Test-Path C:\Users\WesF\Desktop\Dev\Tools\hidapi\hidapi.dll` (a sandboxed install could have been virtualized), then `powershell -ExecutionPolicy Bypass -File tools\install_task.ps1`. The script stops any hand-started copy first.
+
+Observations from the live run on 2026-09-06: the System log shows 5 bugchecks and 12 power-loss
+reboots in the last 30 days (the latter are Kernel-Power 41 with BugcheckCode 0, mostly
+`SleepInProgress` != 0), so the tile headlines bugchecks and lists both. `gh api` for six repos
+takes about 4 s in parallel; the SSH probe about 1 s; wevtutil 20 ms.
 
 ## Phase 3 — ambient
 - [ ] Bezel-gap calibration (`--gap`), weather-as-ambient, plasma, Life, Matrix rain, aquarium; idle 10 min; off on lock.

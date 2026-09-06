@@ -19,6 +19,27 @@ def _minutes(hhmm: str) -> int:
     return int(h) * 60 + int(m)
 
 
+def build_slots(names: list[str], key_count: int, cfg: dict, sources: dict) -> list[Tile | None]:
+    """One tile per key; a wide tile listed on consecutive keys gets a single instance spanning them."""
+    names = (list(names) + [""] * key_count)[:key_count]
+    slots: list[Tile | None] = []
+    i = 0
+    while i < key_count:
+        name = names[i]
+        if not name:
+            slots.append(None)
+            i += 1
+            continue
+        tile = make_tile(name, cfg, sources)
+        span = 1
+        while span < tile.width and i + span < key_count and names[i + span] == name:
+            span += 1
+        tile.slot, tile.span = i, span
+        slots.extend([tile] * span)
+        i += span
+    return slots
+
+
 class App:
     def __init__(self, cfg: dict, deck: DeckBase, sources: dict | None = None):
         self.cfg = cfg
@@ -32,9 +53,7 @@ class App:
         self.night_start = _minutes(dk.get("night_start", "22:00"))
         self.night_end = _minutes(dk.get("night_end", "07:00"))
         self.sources = sources if sources is not None else make_sources(cfg)
-        names = list(cfg.get("layout", {}).get("keys", []))
-        names += [""] * (deck.key_count - len(names))
-        self.slots: list[Tile | None] = [make_tile(n, cfg, self.sources) if n else None for n in names[: deck.key_count]]
+        self.slots = build_slots(cfg.get("layout", {}).get("keys", []), deck.key_count, cfg, self.sources)
         self.presses: queue.Queue = queue.Queue()
         self.zoom: Tile | None = None
         self.zoom_until = 0.0
@@ -45,11 +64,21 @@ class App:
         self.ticks = 0
         self._stop = False
 
+    @property
+    def tiles(self) -> list[Tile]:
+        """Distinct tiles on the board, in key order."""
+        seen: list[Tile] = []
+        for t in self.slots:
+            if t is not None and t not in seen:
+                seen.append(t)
+        return seen
+
     # --- lifecycle -------------------------------------------------------------------
     def start(self) -> None:
         for s in self.sources.values():
             s.start()
-        self.deck.open()
+        if not self.deck.opened:  # main() may have opened it already (retry loop)
+            self.deck.open()
         self.deck.on_press(self._on_press)
         self._invalidate()
         self._apply_brightness(time.time(), force=True)
@@ -84,6 +113,10 @@ class App:
         self.last_press = now
         log.info("key %d pressed (%s)", key, "leave zoom" if self.zoom is not None else "board")
         if self.zoom is not None:
+            try:
+                self.zoom.on_zoom_press(key)
+            except Exception:  # noqa: BLE001
+                log.exception("zoom press handler failed")
             self.zoom = None
             self._invalidate()
             return
@@ -124,14 +157,19 @@ class App:
                     self.deck.set_key_image(i, img)
                 self.zoom_next = now + self.zoom.zoom_refresh
         else:
-            for i, tile in enumerate(self.slots):
-                if tile is not None and now >= tile.next_due:
-                    try:
-                        self.deck.set_key_image(i, tile.render(now))
-                    except Exception:  # noqa: BLE001 - one broken tile must not stop the board
-                        log.exception("tile %s failed to render", tile.name)
-                        self.deck.set_key_image(i, tile.placeholder(tile.name, "render error"))
-                    tile.next_due = now + tile.refresh
+            for tile in self.tiles:
+                if now < tile.next_due:
+                    continue
+                try:
+                    if tile.span > 1:
+                        for k, img in enumerate(tile.render_span(now)[: tile.span]):
+                            self.deck.set_key_image(tile.slot + k, img)
+                    else:
+                        self.deck.set_key_image(tile.slot, tile.render(now))
+                except Exception:  # noqa: BLE001 - one broken tile must not stop the board
+                    log.exception("tile %s failed to render", tile.name)
+                    self.deck.set_key_image(tile.slot, tile.placeholder(tile.name, "render error"))
+                tile.next_due = now + tile.refresh
         self.deck.flush(self.budget_s)
         if now - self._last_brightness_check >= 30:
             self._apply_brightness(now)
