@@ -12,7 +12,7 @@ gap_px = 24            # bezel gap between keys, in key pixels; calibrated in Ph
 tick_hz = 10           # render loop rate
 anim_fps = 8           # animated tiles (weather icon)
 clock_fps = 4          # sweeping second hand
-flush_budget_ms = 60   # max time per tick spent sending key images; the Phase 0 benchmark tunes this
+flush_budget_ms = 60   # max time per tick spent sending key images; measured: a full 15-key repaint takes 60 ms
 zoom_seconds = 10
 idle_minutes = 10      # ambient mode after this much idle time (Phase 3)
 

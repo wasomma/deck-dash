@@ -82,6 +82,7 @@ class App:
 
     def _handle_press(self, key: int, now: float) -> None:
         self.last_press = now
+        log.info("key %d pressed (%s)", key, "leave zoom" if self.zoom is not None else "board")
         if self.zoom is not None:
             self.zoom = None
             self._invalidate()

@@ -10,11 +10,21 @@ A fresh session resumes from this file.
 - `hidapi.dll` (x64) must live in `C:\Users\WesF\Desktop\Dev\Tools\hidapi\`; `deckdash.device.add_hidapi_dir` registers it with `os.add_dll_directory` before the library imports.
 
 ## Phase 0 — spike: open the deck and benchmark it
-Status: **blocked on hidapi.dll** (gate raised 2026-09-06: download `hidapi-win.zip` 1.4 MB from github.com/libusb/hidapi release 0.15.0, or Wes drops `x64\hidapi.dll` in the Tools folder).
+Status: **done 2026-09-06.** `hidapi.dll` 0.15.0 x64 (166,912 bytes) installed in `Desktop\Dev\Tools\hidapi\` (Wes approved the download).
 - [x] `tools/bench.py` written: identity, ms per key, ms per full frame, key-press echo.
-- [ ] Run it; record numbers here; set `flush_budget_ms`, `anim_fps`, `clock_fps` in `config.toml` from them.
+- [x] Run on the unit; numbers below. `flush_budget_ms = 60` covers a full repaint in one tick.
 
-Results: _(pending)_
+Results (serial AL19H1A00539, firmware 1.0.191203, BMP 72x72 flipped both axes):
+
+| Measure | Value |
+|---|---|
+| image convert (PIL -> BMP) | 0.8 ms per key |
+| single key update | 4.0 ms (about 250 keys/s) |
+| full 15-key frame | 60 ms (16.5 fps) |
+
+So the gen-1 bus is not the constraint the plan feared: full-deck animation at 12-15 fps is
+realistic, and dirty-key flushing is a nicety rather than a necessity. Phase 3 can target
+`anim_fps = 12` for ambient scenes.
 
 ## Phase 1 — core loop + first tiles (simulator-verified)
 - [x] `device.py`: dirty-key hashing, per-tick byte budget with round-robin carry-over, reconnect on write failure, `SimDeck` writing `sim/canvas.png` and taking presses from `sim/press.txt`.
