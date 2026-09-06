@@ -33,7 +33,8 @@ realistic, and dirty-key flushing is a nicety rather than a necessity. Phase 3 c
 - [x] `app.py`: 10 Hz tick, per-tile refresh, zoom on press with 10 s timeout, night brightness.
 - [x] pytest suite (`tests/`), 39 tests.
 - [x] Simulator-verified 2026-09-06: `tools/preview.py` renders `sim/board.png` and `sim/zoom-*.png` with live data.
-- [ ] Wes eyeballs the physical deck (needs Phase 0).
+- [x] Wes reviewed the board on the deck 2026-09-06 ("looks great"); zoom presses logged with the expected key indices (top-left origin), so the library's index mapping for the gen-1 unit is confirmed.
+- Note: a Bash-tool background process is killed after 10 minutes; until the Task Scheduler entry exists, start the board with PowerShell `Start-Process` (dies with the desktop session, which is acceptable for review).
 
 Design rule learned from the first zoom renders: **text never straddles a bezel; only graphics
 (lines, fills, bars, big shapes) may span keys.** `Canvas.key_text` enforces it; use it for every
