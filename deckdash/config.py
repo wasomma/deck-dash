@@ -44,8 +44,29 @@ def _toml_value(value) -> str:
     raise TypeError(f"unsupported TOML value: {type(value).__name__}")
 
 
+def _emit_table(lines: list[str], name: str, values: dict) -> None:
+    """Scalars first, then sub-tables and arrays of tables, so the file re-parses to the same dict."""
+    lines.append(f"[{name}]")
+    nested = []
+    for key, value in values.items():
+        if isinstance(value, dict) or (isinstance(value, list) and value and all(isinstance(v, dict) for v in value)):
+            nested.append((key, value))
+        else:
+            lines.append(f"{key} = {_toml_value(value)}")
+    lines.append("")
+    for key, value in nested:
+        if isinstance(value, dict):
+            _emit_table(lines, f"{name}.{key}", value)
+        else:
+            for row in value:
+                lines.append(f"[[{name}.{key}]]")
+                for k, v in row.items():
+                    lines.append(f"{k} = {_toml_value(v)}")
+                lines.append("")
+
+
 def write_local(update: dict, local: Path | str | None = None) -> None:
-    """Merge ``{section: {key: value}}`` into config.local.toml (flat sections only)."""
+    """Merge ``{section: {...}}`` into config.local.toml, keeping whatever else is there."""
     local = Path(local) if local else LOCAL_CONFIG
     existing: dict = {}
     if local.exists():
@@ -54,10 +75,6 @@ def write_local(update: dict, local: Path | str | None = None) -> None:
     merged = _merge(existing, update)
     lines = ["# Machine-local overrides written by deck-dash; not committed.", ""]
     for section, values in merged.items():
-        if not isinstance(values, dict):
-            continue
-        lines.append(f"[{section}]")
-        for key, value in values.items():
-            lines.append(f"{key} = {_toml_value(value)}")
-        lines.append("")
+        if isinstance(values, dict):
+            _emit_table(lines, section, values)
     local.write_text("\n".join(lines), encoding="utf-8")

@@ -49,6 +49,7 @@ class DeckBase:
         self._cursor = 0
         self._press_cb: PressCallback | None = None
         self.sent = 0  # key images actually transmitted (for tests and stats)
+        self.opened = False
 
     # --- lifecycle -------------------------------------------------------------------
     def open(self) -> None:
@@ -142,8 +143,10 @@ class RealDeck(DeckBase):
         self.invalidate()
         deck.set_brightness(self.brightness)
         deck.set_key_callback(self._callback)
+        self.opened = True
 
     def close(self) -> None:
+        self.opened = False
         if self._deck is None:
             return
         try:
@@ -204,8 +207,10 @@ class SimDeck(DeckBase):
 
     def open(self) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.opened = True
 
     def close(self) -> None:
+        self.opened = False
         self.write()
 
     def set_brightness(self, percent: int) -> None:

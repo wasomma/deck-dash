@@ -1,6 +1,7 @@
 # deck-dash configuration.
-# Machine-local overrides (weather location, anything personal) live in config.local.toml,
-# which is gitignored and written automatically on first run.
+# Machine-local overrides (weather location, LAN addresses, VPS hosts, anything personal) live in
+# config.local.toml, which is gitignored; the weather location is written there automatically on
+# first run. Any table here can be overridden there, key by key.
 
 [deck]
 hidapi_dir = "C:/Users/WesF/Desktop/Dev/Tools/hidapi"   # folder holding hidapi.dll (x64)
@@ -10,11 +11,18 @@ night_start = "22:00"
 night_end = "07:00"
 gap_px = 24            # bezel gap between keys, in key pixels; calibrated in Phase 3
 tick_hz = 10           # render loop rate
-anim_fps = 8           # animated tiles (weather icon)
+anim_fps = 8           # animated tiles (weather icon, pickaxe, pulsing CI dot)
 clock_fps = 4          # sweeping second hand
 flush_budget_ms = 60   # max time per tick spent sending key images; measured: a full 15-key repaint takes 60 ms
 zoom_seconds = 10
-idle_minutes = 10      # ambient mode after this much idle time (Phase 3)
+idle_minutes = 10      # ambient scenes after this long without a key press; 0 disables them
+off_on_lock = true     # deck dark while the Windows session is locked
+lock_poll_seconds = 5
+
+[ambient]
+scenes = ["weather", "plasma", "life", "matrix", "aquarium"]   # rotation order
+scene_minutes = 5      # each scene runs this long before the next one
+fps = 8                # ceiling for full-deck animation (a 15-key repaint is 60 ms on the gen-1 deck)
 
 [clock]
 twelve_hour = true
@@ -34,10 +42,67 @@ disk = "C:/"
 [gpu]
 index = 0
 
+[bitaxe]
+host = "bitaxe.local"  # AxeOS default hostname; put the LAN IP in config.local.toml if mDNS is slow
+poll_seconds = 10
+
+[ci]
+poll_seconds = 120
+poll_seconds_running = 30   # while any workflow is in progress
+repos = [
+  { repo = "wasomma/fpv-sim",       label = "sim" },
+  { repo = "wasomma/fpv-sim-mcp",   label = "mcp" },
+  { repo = "wasomma/fpv-sim-app",   label = "app" },
+  { repo = "wasomma/fpv-sim-range", label = "range" },
+  { repo = "wasomma/drift-duet",    label = "duet" },
+  { repo = "wasomma/guild-mp",      label = "guild" },
+]
+
+[vps]
+# Filled in config.local.toml: ssh_host (an alias from ~/.ssh/config, key auth) and one
+# [[vps.services]] table per service with name, label, unit, port, local (URL curl'ed on the
+# box over ssh) and public (URL fetched from this PC for edge latency). Up to three are shown.
+poll_seconds = 60
+ssh_host = ""
+services = []
+
+[bsod]
+poll_seconds = 60
+window_days = 30       # crash count shown on the tile covers this many days
+max_events = 60
+
+[news]
+refresh_minutes = 10
+per_feed = 8
+speed_px = 60          # marquee speed, pixels per second
+fps = 10               # marquee frame rate (5 keys per frame)
+feeds = [
+  { name = "HN",  url = "https://news.ycombinator.com/rss",                 color = "#ff6600" },
+  { name = "Ars", url = "https://feeds.arstechnica.com/arstechnica/index",  color = "#ff5a78" },
+  { name = "BBC", url = "https://feeds.bbci.co.uk/news/world/rss.xml",      color = "#e0393e" },
+]
+
+[alerts]
+enabled = true
+toast_seconds = 5      # full-deck toast, then a badge on the owning tile until it is pressed
+
+[claude]
+poll_seconds = 2
+show_minutes = 15      # the Claude tile keeps its key this long after a session's last event
+
+[nowplaying]
+enabled = true
+poll_seconds = 1
+paused_grace_seconds = 120   # keep showing a paused track this long
+ignore_apps = []             # substrings of source app ids to ignore, e.g. ["msedge", "chrome"] to skip browser tabs
+
 [layout]
-# 15 slots, row-major from the top-left key. "" leaves a key dark.
+# 15 slots, row-major from the top-left key. "" leaves a key dark. A wide tile (news) is
+# listed once per key it spans. overlays: {base = "top"} lets the top tile take the base
+# tile's key while it has something to show (music playing, a Claude session alive).
+overlays = { forecast = "nowplaying", net = "claude" }
 keys = [
-  "clock", "weather", "forecast", "gpu", "cpu",
-  "net",   "",        "",         "",    "",
-  "",      "",        "",         "",    "",
+  "clock", "weather", "forecast", "gpu",  "cpu",
+  "net",   "bitaxe",  "ci",       "vps",  "bsod",
+  "news",  "news",    "news",     "news", "news",
 ]
