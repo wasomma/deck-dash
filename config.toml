@@ -82,9 +82,25 @@ feeds = [
   { name = "BBC", url = "https://feeds.bbci.co.uk/news/world/rss.xml",      color = "#e0393e" },
 ]
 
+[alerts]
+enabled = true
+toast_seconds = 5      # full-deck toast, then a badge on the owning tile until it is pressed
+
+[claude]
+poll_seconds = 2
+show_minutes = 15      # the Claude tile keeps its key this long after a session's last event
+
+[nowplaying]
+enabled = true
+poll_seconds = 1
+paused_grace_seconds = 120   # keep showing a paused track this long
+ignore_apps = []             # substrings of source app ids to ignore, e.g. ["msedge", "chrome"] to skip browser tabs
+
 [layout]
 # 15 slots, row-major from the top-left key. "" leaves a key dark. A wide tile (news) is
-# listed once per key it spans.
+# listed once per key it spans. overlays: {base = "top"} lets the top tile take the base
+# tile's key while it has something to show (music playing, a Claude session alive).
+overlays = { forecast = "nowplaying", net = "claude" }
 keys = [
   "clock", "weather", "forecast", "gpu",  "cpu",
   "net",   "bitaxe",  "ci",       "vps",  "bsod",

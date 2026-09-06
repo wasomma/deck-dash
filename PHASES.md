@@ -75,4 +75,15 @@ Status: **code done 2026-09-06** (previews in `sim/ambient-*.png`, all scenes un
 - [ ] Wes eyeballs the scenes on the hardware (idle 10 min, or `.venv\Scripts\python -m deckdash --ambient aquarium`).
 
 ## Phase 4 — alerts and the interesting buttons
-- [ ] Toast overlay; Claude-needs-you tile via hooks (gate: `settings.json` edit through the update-config skill); now-playing tile (Windows media session API).
+Status: **code done 2026-09-06** (92 tests). Two gates for Wes (below).
+- [x] `alerts.py`: `AlertWatcher` diffs the sources once a second: CI fail/pass per repo, miner offline/back (45 s without an answer) and new best difficulty, VPS service down/degraded/up, new bugcheck or power-loss reboot (last seen time persisted in `state/alerts.json`, so a crash toasts once the PC is back and history is never replayed), Claude session waiting. `render_toast` = 5 s full-deck toast (ripple, or sparkles for a record) with kind / title / subject in row 1 and the detail wrapped on row 2; `draw_badge` = corner dot on the owning tile until it is pressed; a recovery ("good") alert clears the badge. Toasts interrupt zoom and ambient, wait while locked, and a press dismisses without a badge.
+- [x] Overlays: `[layout] overlays = { forecast = "nowplaying", net = "claude" }`. `OverlayTile` shows the top tile while `active(now)` and the base tile otherwise (zoom, press and badge follow whichever is showing).
+- [x] Claude-needs-you: `tools/claude_hook.py` appends hook payloads to `state/claude-events.jsonl`; `sources/claude.py` tails it into per-session state (busy / waiting / idle, project from cwd, worktrees shown as `repo/wt`); `tiles/claude.py` = one dot per session (amber pulse while waiting), zoom = one key per session with the message; press acknowledges. Setup and the settings snippet: `docs/claude-hooks.md`.
+- [x] Now playing: `tools/media_watch.ps1` (PowerShell WinRT, no new packages) streams the Windows media session as JSON lines, album art only when it changes, commands through `state/media-cmd.txt`; `sources/media.py` keeps the helper alive; `tiles/nowplaying.py` = art background, sliding title, artist, progress; zoom = art on a 2x2 block, title/artist/album, progress across row 3, keys 10/12/14 = previous / play-pause / next (stays zoomed). `nowplaying.ignore_apps` skips browser sessions if wanted (verified live: an Edge tab playing a stream shows up as "MSEdge").
+- [ ] **Gate (Wes):** hooks. Say the word and I merge the five hook entries from `docs/claude-hooks.md` into `~/.claude/settings.json` through the update-config skill (Read + Edit, then a JSON validation), or paste them yourself. Until then the tile says "hooks off" and stays hidden behind `net`.
+- [ ] Wes eyeballs a toast (`python tools\claude_hook.py --event Notification --session demo --message "hello"` fires one once hooks are... not even needed: the CLAUDE alert reads the same events file, so this works today).
+
+Out of scope by decision: audio-reactive bars.
+
+## Merge and push
+Phases 2-4 are commits on `claude/sweet-mclean-8f59b9` (worktree). On "push it": fast-forward `main` to the branch and push; the main checkout then needs `git pull` before the scheduled task runs from it.

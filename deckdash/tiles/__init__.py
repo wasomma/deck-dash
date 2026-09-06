@@ -4,11 +4,14 @@ from .base import Tile
 from .bitaxe import BitaxeTile
 from .bsod import BsodTile
 from .ci import CiTile
+from .claude import ClaudeTile
 from .clock import ClockTile
 from .cpu import CpuTile
 from .gpu import GpuTile
 from .net import NetTile
 from .news import NewsTile
+from .nowplaying import NowPlayingTile
+from .overlay import OverlayTile
 from .vps import VpsTile
 from .weather import ForecastTile, WeatherNowTile
 
@@ -24,7 +27,11 @@ TILES: dict[str, type[Tile]] = {
     "vps": VpsTile,
     "bsod": BsodTile,
     "news": NewsTile,
+    "claude": ClaudeTile,
+    "nowplaying": NowPlayingTile,
 }
+
+__all__ = ["Tile", "TILES", "OverlayTile", "make_tile"]
 
 
 def make_tile(name: str, cfg: dict, sources: dict) -> Tile:

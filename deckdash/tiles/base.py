@@ -39,8 +39,16 @@ class Tile:
     def on_press(self) -> None:
         pass
 
-    def on_zoom_press(self, key: int) -> None:
-        """A key was pressed while this tile's zoom view was showing; the app leaves zoom afterwards."""
+    def on_zoom_press(self, key: int):
+        """A key was pressed while this tile's zoom view was showing. Return True to stay zoomed."""
+        return None
+
+    def active(self, now: float) -> bool:
+        """For tiles that overlay another key: True while there is something to show."""
+        return True
+
+    def matches(self, name: str) -> bool:
+        return name == self.name
 
     def placeholder(self, title: str, sub: str | None = None) -> Image.Image:
         img = new_key()

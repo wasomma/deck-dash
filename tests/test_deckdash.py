@@ -10,6 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from deckdash import config, gfx, wx_icons  # noqa: E402
+from deckdash.alerts import Alert, AlertWatcher, draw_badge, render_toast  # noqa: E402
 from deckdash.ambient import SCENES, make_scene  # noqa: E402
 from deckdash.app import App  # noqa: E402
 from deckdash.canvas import Canvas  # noqa: E402
@@ -18,21 +19,25 @@ from deckdash.sources.base import StaticSource  # noqa: E402
 from deckdash.sources.bitaxe import fmt_diff, fmt_hash, parse_axeos  # noqa: E402
 from deckdash.sources.bsod import merge_crashes, parse_events, summarize  # noqa: E402
 from deckdash.sources.ci import normalize_repos, summarize_repo  # noqa: E402
+from deckdash.sources.claude import ClaudePoller, apply_event, project_name  # noqa: E402
+from deckdash.sources.claude import summarize as summarize_sessions  # noqa: E402
+from deckdash.sources.media import is_active, parse_line  # noqa: E402
 from deckdash.sources.news import interleave, parse_feed  # noqa: E402
 from deckdash.sources.vps import parse_probe, service_state  # noqa: E402
 from deckdash.sources.weather import parse_openmeteo  # noqa: E402
-from deckdash.tiles import TILES, make_tile  # noqa: E402
+from deckdash.tiles import TILES, OverlayTile, make_tile  # noqa: E402
 from deckdash.tiles.ci import wrap_text  # noqa: E402
 from deckdash.tiles.news import Strip  # noqa: E402
 
 FIX = ROOT / "tests" / "fixtures"
 GB = 1 << 30
-SOURCE_NAMES = ("weather", "sys", "gpu", "ping", "bitaxe", "ci", "vps", "bsod", "news")
+SOURCE_NAMES = ("weather", "sys", "gpu", "ping", "bitaxe", "ci", "vps", "bsod", "news", "claude", "media")
 
 
 @pytest.fixture
 def cfg():
     c = config.load(ROOT / "config.toml", local=ROOT / "tests" / "no-such-local.toml")
+    c["alerts"]["enabled"] = False  # tests inject alerts by hand; no state file in the repo
     c["vps"]["services"] = [
         {"name": "fpv-sim-mcp", "label": "mcp", "unit": "fpv-sim-mcp", "port": 8080},
         {"name": "sales-live", "label": "sales", "unit": "sales-live", "port": 8141},
@@ -99,6 +104,35 @@ def news_state(now):
     return {"items": items, "errors": [], "fetched": now}
 
 
+def claude_events(t):
+    return [
+        {"session_id": "a", "cwd": "C:/x/fpv-sim/.claude/worktrees/w1", "event": "SessionStart", "t": t - 300},
+        {"session_id": "a", "event": "UserPromptSubmit", "t": t - 200},
+        {"session_id": "a", "event": "Notification", "message": "Permission needed: Bash(git push)", "t": t - 60},
+        {"session_id": "b", "cwd": "C:/x/drift-duet", "event": "UserPromptSubmit", "t": t - 30},
+        {"session_id": "c", "cwd": "C:/x/guild-mp", "event": "Stop", "t": t - 10},
+    ]
+
+
+def claude_state(now):
+    sessions = {}
+    for ev in claude_events(now):
+        apply_event(sessions, ev)
+    return summarize_sessions(sessions, now)
+
+
+def media_state(now):
+    art = Image.new("RGB", (300, 300))
+    d = __import__("PIL.ImageDraw", fromlist=["Draw"]).Draw(art)
+    for y in range(300):
+        d.line([(0, y), (300, y)], fill=(y // 2, 60, 200 - y // 2))
+    return {
+        "status": "Playing", "title": "A very long song title that has to scroll", "artist": "Some Artist",
+        "album": "The Album", "app": "Spotify.exe", "pos": 61.0, "dur": 240.0, "updated": now,
+        "art_key": "k", "art": art, "art_of": "k", "last_playing": now, "sampled": now,
+    }
+
+
 @pytest.fixture
 def sources():
     now = time.time()
@@ -124,6 +158,8 @@ def sources():
         "vps": StaticSource(vps_state()),
         "bsod": StaticSource(bsod_state(now)),
         "news": StaticSource(news_state(now)),
+        "claude": StaticSource(claude_state(now)),
+        "media": StaticSource(media_state(now)),
     }
 
 
@@ -360,6 +396,7 @@ def test_wide_tile_spans_and_opens_headline(cfg, sources, tmp_path, monkeypatch)
 
 def test_layout_with_partial_span(sources, tmp_path):
     cfg = config.load(ROOT / "config.toml", local=ROOT / "tests" / "no-such-local.toml")
+    cfg["alerts"]["enabled"] = False
     cfg["layout"]["keys"] = ["news", "news", "clock", "", "news"]
     deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
     app = App(cfg, deck, sources=sources)
@@ -488,6 +525,192 @@ def test_app_lock_turns_deck_off(cfg, sources, tmp_path):
     locked["v"] = False
     app.tick()
     assert app.mode == "board" and deck.brightness == app.brightness
+    app.stop()
+
+
+# --- Phase 4: alerts, Claude sessions, now playing -------------------------------------
+
+def test_claude_events_to_sessions():
+    t = time.time()
+    sessions = {}
+    for ev in claude_events(t):
+        apply_event(sessions, ev)
+    assert sessions["a"]["state"] == "waiting" and sessions["a"]["project"] == "fpv-sim/wt"
+    assert sessions["a"]["message"].startswith("Permission")
+    assert sessions["b"]["state"] == "busy" and sessions["c"]["state"] == "idle"
+    s = summarize_sessions(sessions, t)
+    assert s["waiting"] == 1 and s["busy"] == 1
+    assert [x["id"] for x in s["sessions"]][0] == "a"  # waiting sessions first
+    apply_event(sessions, {"session_id": "a", "event": "SessionEnd", "t": t})
+    assert "a" not in sessions
+    assert summarize_sessions(sessions, t + 7 * 3600)["sessions"] == []
+    assert project_name("C:\\Users\\x\\Desktop\\Dev\\Projects\\deck-dash") == "deck-dash"
+
+
+def test_claude_poller_tails_file(cfg, tmp_path):
+    p = ClaudePoller(cfg)
+    p.path = tmp_path / "events.jsonl"
+    with pytest.raises(RuntimeError):
+        p.fetch()
+    t = time.time()
+    p.path.write_text("\n".join(json.dumps(e) for e in claude_events(t)[:2]) + "\n", encoding="utf-8")
+    st = p.fetch()
+    assert st["busy"] == 1 and st["waiting"] == 0
+    with open(p.path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(claude_events(t)[2]) + "\nnot json\n")
+    st = p.fetch()
+    assert st["waiting"] == 1
+    p.ack(t + 1)
+    assert p.fetch()["waiting"] == 0
+
+
+def test_claude_hook_script(tmp_path, monkeypatch):
+    import importlib.util
+    import io
+
+    spec = importlib.util.spec_from_file_location("claude_hook", ROOT / "tools" / "claude_hook.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "EVENTS", tmp_path / "state" / "events.jsonl")
+    monkeypatch.setattr(sys, "argv", ["claude_hook.py"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "s1", "cwd": "C:/x/repo", "hook_event_name": "Notification", "message": "hi", "transcript_path": "secret"})))
+    assert mod.main() == 0
+    monkeypatch.setattr(sys, "argv", ["claude_hook.py", "--event", "Stop", "--session", "s1"])
+    assert mod.main() == 0
+    lines = [json.loads(line) for line in (tmp_path / "state" / "events.jsonl").read_text().splitlines()]
+    assert lines[0]["event"] == "Notification" and lines[0]["message"] == "hi" and "transcript_path" not in lines[0]
+    assert lines[1]["event"] == "Stop" and lines[1]["session_id"] == "s1"
+
+
+def test_media_parse_and_active():
+    import base64
+    import io
+
+    now = time.time()
+    st = parse_line('{"status":"Playing","title":"T","artist":"A","album":"","app":"MSEdge","pos":10,"dur":-1e-06,"updated":1,"art_key":"T|A|","art":null}', {}, now)
+    assert st["status"] == "Playing" and st["art"] is None and is_active(st, now)
+    assert not is_active(st, now, ignore_apps=["msedge"])
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (1, 2, 3)).save(buf, format="PNG")
+    line = json.dumps({"status": "Playing", "title": "T", "artist": "A", "album": "", "app": "x", "art_key": "T|A|", "art": base64.b64encode(buf.getvalue()).decode()})
+    st = parse_line(line, st, now)
+    assert st["art"].size == (8, 8)
+    st = parse_line('{"status":"Paused","title":"T","artist":"A","album":"","app":"x","art_key":"T|A|","art":null}', st, now + 1)
+    assert st["art"] is not None  # survives lines without art
+    assert is_active(st, now + 1) and not is_active(st, now + 1000)
+    st = parse_line('{"status":"Playing","title":"U","artist":"A","album":"","app":"x","art_key":"U|A|","art":null}', st, now + 2)
+    assert st["art"] is None  # a new track drops the old art
+    st = parse_line('{"status":"None"}', st, now + 3)
+    assert not is_active(st, now + 3)
+
+
+def test_alert_watcher_transitions(cfg, tmp_path):
+    now = time.time()
+    ci = StaticSource(ci_state(now))
+    bitaxe = StaticSource(bitaxe_state())
+    bitaxe.last_ok = now
+    vps = StaticSource(vps_state())
+    bsod = StaticSource(bsod_state(now))
+    claude = StaticSource(claude_state(now))
+    srcs = {"ci": ci, "bitaxe": bitaxe, "vps": vps, "bsod": bsod, "claude": claude}
+    w = AlertWatcher(cfg, srcs, tmp_path / "alerts.json")
+    first = w.check(now)
+    assert [a.kind for a in first] == ["CLAUDE"] and first[0].subject == "fpv-sim/wt"
+    assert w.check(now) == []
+    ci.state["repos"][0]["status"] = "ok"
+    alerts = w.check(now + 1)
+    assert [(a.kind, a.title, a.style) for a in alerts] == [("CI", "PASSED", "good")]
+    ci.state["repos"][2]["status"] = "fail"
+    assert [(a.title, a.subject) for a in w.check(now + 2)] == [("FAILED", "mcp")]
+    bitaxe.last_ok = now - 100
+    assert [a.title for a in w.check(now + 3)] == ["OFFLINE"]
+    bitaxe.last_ok = now + 4
+    assert [a.title for a in w.check(now + 4)] == ["BACK"]
+    bitaxe._state["best"] *= 2
+    rec = w.check(now + 5)
+    assert [(a.title, a.style) for a in rec] == [("NEW BEST", "record")]
+    vps.state["services"][2]["state"] = "ok"
+    assert [(a.title, a.subject) for a in w.check(now + 6)] == [("UP", "guild")]
+    vps.state["services"][0]["state"] = "down"
+    assert [(a.title, a.subject, a.tile) for a in w.check(now + 7)] == [("DOWN", "mcp", "vps")]
+    persisted = json.loads((tmp_path / "alerts.json").read_text())
+    assert persisted["bsod_last"] > 0 and persisted["bitaxe_best"] == bitaxe._state["best"]
+    bsod._state["last"] = dict(bsod._state["last"], time=now + 8, code=0xBE, kind="bsod", name="WR_RO_MEM")
+    crash = w.check(now + 9)
+    assert [(a.kind, a.title, a.subject) for a in crash] == [("BSOD", "BUGCHECK", "0xBE")]
+    w2 = AlertWatcher(cfg, srcs, tmp_path / "alerts.json")
+    assert not any(a.kind in ("BSOD", "MINER") for a in w2.check(now + 10))
+
+
+def test_toast_render_and_badge():
+    for style in ("alert", "good", "record"):
+        for t in (0.0, 0.7, 3.9):
+            images = render_toast(Alert("CI", "FAILED", "app", "ci on main, a fairly long detail line to wrap", gfx.RED, "ci", style), 24, t)
+            assert len(images) == 15
+            for img in images:
+                _assert_key(img)
+    img = gfx.new_key()
+    assert draw_badge(img, gfx.RED).tobytes() != img.tobytes()
+
+
+def test_app_toast_then_badge_then_ack(cfg, sources, tmp_path):
+    cfg["deck"]["off_on_lock"] = False
+    deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
+    app = App(cfg, deck, sources=sources)
+    assert app.watcher is None
+    app.start()
+    app.tick()
+    app.toast_queue.append(Alert("CI", "FAILED", "app", "ci on main", gfx.RED, "ci"))
+    app.tick()
+    assert app.mode == "toast"
+    app.toast_started -= 10
+    app.tick()
+    assert app.mode == "board" and 7 in app.badges
+    app._on_press(7, True)
+    app.tick()
+    assert 7 not in app.badges and app.zoom is not None and app.zoom.name == "ci"
+    app._on_press(0, True)
+    app.tick()
+    app.toast_queue.append(Alert("VPS", "DOWN", "mcp", "", gfx.RED, "vps"))
+    app.tick()
+    app._on_press(3, True)  # dismissed by hand: no badge
+    app.tick()
+    assert app.mode == "board" and app.badges == {}
+    app.badges[7] = Alert("CI", "FAILED", "app", "", gfx.RED, "ci")
+    app.toast_queue.append(Alert("CI", "PASSED", "app", "", gfx.GREEN, "ci", "good"))
+    app.tick()
+    app.toast_started -= 10
+    app.tick()
+    assert app.badges == {}  # the recovery clears the badge
+    app.stop()
+
+
+def test_overlay_tiles_swap_and_control(cfg, sources, tmp_path):
+    cfg["deck"]["off_on_lock"] = False
+    deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
+    app = App(cfg, deck, sources=sources)
+    music, claude = app.slots[2], app.slots[5]
+    assert isinstance(music, OverlayTile) and isinstance(claude, OverlayTile)
+    app.start()
+    app.tick()
+    assert music.current.name == "nowplaying" and claude.current.name == "claude"
+    sent = []
+    sources["media"].send = lambda cmd: sent.append(cmd)
+    app._on_press(2, True)
+    app.tick()
+    assert app.zoom is music
+    app._on_press(12, True)  # play/pause: stays zoomed
+    app.tick()
+    assert app.zoom is music and sent == ["toggle"]
+    app._on_press(0, True)
+    app.tick()
+    assert app.zoom is None
+    sources["media"]._state = {"status": "None"}
+    sources["claude"]._state = {"sessions": [], "waiting": 0, "busy": 0}
+    music.next_due = claude.next_due = 0.0
+    app.tick()
+    assert music.current.name == "forecast" and claude.current.name == "net"
+    assert music.matches("nowplaying") and music.matches("forecast")
     app.stop()
 
 

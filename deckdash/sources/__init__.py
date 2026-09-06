@@ -6,7 +6,9 @@ from .base import Poller, StaticSource
 from .bitaxe import BitaxePoller
 from .bsod import BsodPoller
 from .ci import GhPoller
+from .claude import ClaudePoller
 from .gpu import GpuPoller
+from .media import MediaSource
 from .news import NewsPoller
 from .sysmon import PingPoller, SysPoller
 from .vps import VpsPoller
@@ -24,6 +26,8 @@ SOURCE_CLASSES = {
     "vps": VpsPoller,
     "bsod": BsodPoller,
     "news": NewsPoller,
+    "claude": ClaudePoller,
+    "media": MediaSource,
 }
 
 

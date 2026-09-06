@@ -43,6 +43,17 @@ Life, Matrix rain and an aquarium, five minutes each. Any press brings the board
 Brightness drops to 30% from 22:00 to 07:00 and the deck goes dark while the Windows session
 is locked. `python -m deckdash --ambient aquarium` starts straight into a scene.
 
+Alerts interrupt whatever is showing with a five-second full-deck toast, then leave a dot on
+the owning tile until it is pressed: a CI run fails (and passes again), the Bitaxe drops off
+the LAN (and returns) or sets a new best difficulty, a VPS service goes down (and comes back),
+a new bugcheck appears in the System log after a reboot, a Claude Code session needs input.
+
+Two tiles overlay others only while they have something to show (`[layout] overlays`): the
+now-playing tile takes the forecast key while music plays (album art, sliding title, progress;
+zoom has previous / play-pause / next on the bottom row) and the Claude tile takes the net key
+while a Claude Code session is working, waiting for you, or just finished. The Claude tile
+needs five hooks in `~/.claude/settings.json`; see `docs/claude-hooks.md`.
+
 Bezel gap: the scenes and the ticker draw on a virtual canvas that includes the gaps between
 keys. Calibrate it once on the real deck with `.venv\Scripts\python tools\calibrate.py`
 (free the device first: `tools\install_task.ps1 -Stop`); key 14 saves `gap_px` to
@@ -76,8 +87,10 @@ overridden there key by key.
   a bezel (`Canvas.key_text`); only graphics may span keys. The marquee is the deliberate
   exception.
 - `deckdash/ambient/`: one file per scene; a scene paints the whole canvas per frame.
+- `deckdash/alerts.py`: alert detection, the toast, the badge.
 - `deckdash/session.py`: Windows lock detection (polled).
-- `deckdash/app.py`: the render loop: board, zoom, ambient, locked.
-- `tools/install_task.ps1`: the logon task; `tools/calibrate.py`: bezel-gap calibration.
+- `deckdash/app.py`: the render loop: board, zoom, toast, ambient, locked.
+- `tools/install_task.ps1`: the logon task; `tools/calibrate.py`: bezel-gap calibration;
+  `tools/media_watch.ps1`: the media-session helper; `tools/claude_hook.py`: the hook.
 
 Tests: `.venv\Scripts\python -m pytest -q`

@@ -155,7 +155,7 @@ class CiTile(Tile):
             c.key_text(4, STATUS_WORD.get(sp["status"], sp["status"]), 15, col, where="t", pad=10)
             c.key_text(4, _age(now, sp["at"]) + (" ago" if sp["at"] else ""), 11, DIM, where="b", pad=8, weight="semibold")
             wf = sp["workflow"] or sp["title"] or "-"
-            lines = wrap_text(wf, 62, 11, max_lines=3)
+            lines = wrap_text(wf, 58, 11, max_lines=3)
             for j, line in enumerate(lines):
                 c.key_text(8, line, 11, FG, where="t", pad=6 + 14 * j, weight="semibold")
             c.key_text(9, sp["branch"][:14] if sp["branch"] else "", 12, BLUE, where="t", pad=8, weight="semibold")
