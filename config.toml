@@ -1,0 +1,43 @@
+# deck-dash configuration.
+# Machine-local overrides (weather location, anything personal) live in config.local.toml,
+# which is gitignored and written automatically on first run.
+
+[deck]
+hidapi_dir = "C:/Users/WesF/Desktop/Dev/Tools/hidapi"   # folder holding hidapi.dll (x64)
+brightness = 80
+night_brightness = 30
+night_start = "22:00"
+night_end = "07:00"
+gap_px = 24            # bezel gap between keys, in key pixels; calibrated in Phase 3
+tick_hz = 10           # render loop rate
+anim_fps = 8           # animated tiles (weather icon)
+clock_fps = 4          # sweeping second hand
+flush_budget_ms = 60   # max time per tick spent sending key images; the Phase 0 benchmark tunes this
+zoom_seconds = 10
+idle_minutes = 10      # ambient mode after this much idle time (Phase 3)
+
+[clock]
+twelve_hour = true
+
+[weather]
+latitude = 0.0         # 0/0 = look up once from the public IP and cache in config.local.toml
+longitude = 0.0
+place = ""
+units = "imperial"     # imperial (F, mph) or metric (C, km/h)
+refresh_minutes = 10
+
+[net]
+ping_host = "1.1.1.1"
+ping_seconds = 5
+disk = "C:/"
+
+[gpu]
+index = 0
+
+[layout]
+# 15 slots, row-major from the top-left key. "" leaves a key dark.
+keys = [
+  "clock", "weather", "forecast", "gpu", "cpu",
+  "net",   "",        "",         "",    "",
+  "",      "",        "",         "",    "",
+]
