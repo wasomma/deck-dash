@@ -23,8 +23,10 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $python = Join-Path $root '.venv\Scripts\pythonw.exe'
 
 function Stop-DeckDashProcesses {
-    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*-m deckdash*' -and $_.Name -like 'python*' } | ForEach-Object {
-        Write-Host ("stopping pid " + $_.ProcessId)
+    Get-CimInstance Win32_Process | Where-Object {
+        ($_.CommandLine -like '*-m deckdash*' -and $_.Name -like 'python*') -or ($_.CommandLine -like '*media_watch.ps1*' -and $_.Name -like 'powershell*')
+    } | ForEach-Object {
+        Write-Host ("stopping pid " + $_.ProcessId + " (" + $_.Name + ")")
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
 }

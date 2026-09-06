@@ -62,6 +62,7 @@ def summarize(sessions: dict, now: float, stale_s: float = 6 * 3600) -> dict:
         "sessions": live,
         "waiting": sum(1 for s in live if s["state"] == "waiting" and s["since"] > s["seen"]),
         "busy": sum(1 for s in live if s["state"] == "busy"),
+        "hooks": True,
         "checked": now,
     }
 
@@ -93,8 +94,8 @@ class ClaudePoller(Poller):
 
     def fetch(self) -> dict:
         now = time.time()
-        if not self.path.exists():
-            raise RuntimeError("hooks off")
+        if not self.path.exists():  # hooks not wired yet: an empty board, not an error
+            return {"sessions": [], "waiting": 0, "busy": 0, "hooks": False, "checked": now}
         st = self.path.stat()
         if st.st_size < self._offset:
             self._offset = 0  # rotated or truncated

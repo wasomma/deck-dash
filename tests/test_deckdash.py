@@ -550,8 +550,7 @@ def test_claude_events_to_sessions():
 def test_claude_poller_tails_file(cfg, tmp_path):
     p = ClaudePoller(cfg)
     p.path = tmp_path / "events.jsonl"
-    with pytest.raises(RuntimeError):
-        p.fetch()
+    assert p.fetch()["hooks"] is False  # no file yet: empty, not an error
     t = time.time()
     p.path.write_text("\n".join(json.dumps(e) for e in claude_events(t)[:2]) + "\n", encoding="utf-8")
     st = p.fetch()

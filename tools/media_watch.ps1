@@ -33,11 +33,14 @@ $propsType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMed
 $streamType = [Windows.Storage.Streams.IRandomAccessStreamWithContentType]
 
 $cmdFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'state\media-cmd.txt'
+$parentPid = (Get-CimInstance Win32_Process -Filter "ProcessId = $PID").ParentProcessId
 $mgr = Await ($mgrType::RequestAsync()) ($mgrType)
 $lastArtKey = ''
 Emit ([ordered]@{ status = 'Ready' })
 
 while ($true) {
+    # Follow the parent down: a force-killed deck-dash must not leave this helper polling forever.
+    if ($parentPid -and -not (Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) { exit 0 }
     try {
         $session = $mgr.GetCurrentSession()
         if ($null -eq $session) {

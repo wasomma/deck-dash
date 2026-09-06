@@ -51,8 +51,8 @@ class ClaudeTile(Tile):
         img = new_key()
         d = ImageDraw.Draw(img)
         text(d, (5, 8), "CLAUDE", 8, PURPLE, anchor="lm")
-        if not st:
-            text(d, (36, 36), "hooks off" if (src.error or "").startswith("hooks") else "loading", 10, DIM)
+        if not st or not st.get("hooks", True):
+            text(d, (36, 36), "hooks off" if st else "loading", 10, DIM)
             text(d, (36, 50), "see docs", 8, DIM, weight="regular")
             self.refresh = 5.0
             return img
@@ -94,7 +94,8 @@ class ClaudeTile(Tile):
         sessions = (st.get("sessions") or [])[:15]
         if not sessions:
             c.key_text(7, "no sessions", 13, DIM)
-            c.key_text(12, "hooks: docs/claude-hooks.md" if not st else "", 8, DIM, weight="semibold")
+            if not st.get("hooks", True):
+                c.key_text(12, "hooks off: see docs", 9, DIM, weight="semibold")
             return c.slice()
         for i, s in enumerate(sessions):
             col = STATE_COLOR.get(s["state"], TRACK)
