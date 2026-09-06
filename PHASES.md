@@ -59,7 +59,7 @@ worktree). The Task Scheduler registration is a gate for Wes (below).
 - [x] News ticker (`sources/news.py`, `tiles/news.py`): first wide tile (`width = 5`, `render_span`); marquee at 60 px/s, 10 fps, seamless wrap, new headlines swapped in at the wrap; zoom = five headlines in five columns starting from the one under the window centre; pressing a column opens the story (`webbrowser.open`). App gained `build_slots` (wide tiles) and `on_zoom_press`.
 - [x] `main.py`: named-mutex single instance, `open_with_retry` (deck absent at logon), no stderr handler under `pythonw`.
 - [x] `tools/install_task.ps1` (ASCII, parse-checked): at-logon task for the current user, 20 s delay, restart every minute up to 99 times, unlimited run time, `IgnoreNew`; refuses to register if `hidapi.dll` is not visible; `-Status` / `-Remove`.
-- [ ] **Gate (Wes):** from his own terminal, `Test-Path C:\Users\WesF\Desktop\Dev\Tools\hidapi\hidapi.dll` (a sandboxed install could have been virtualized), then `powershell -ExecutionPolicy Bypass -File tools\install_task.ps1`. The script stops any hand-started copy first.
+- [ ] **Gate (Wes):** from his own terminal, in the main checkout: `Test-Path C:\Users\WesF\Desktop\Dev\Tools\hidapi\hidapi.dll` (a sandboxed install could have been virtualized), then `powershell -ExecutionPolicy Bypass -File tools\install_task.ps1`. Registers the task and starts it; stops any hand-started copy first. Do the gap calibration (Phase 3 gate) before this while the deck is free, so the task starts with the saved gap. Checked on the evening of 2026-09-06: nothing running, no task registered, and the script now exists in the main checkout next to the venv.
 
 Observations from the live run on 2026-09-06: the System log shows 5 bugchecks and 12 power-loss
 reboots in the last 30 days (the latter are Kernel-Power 41 with BugcheckCode 0, mostly
@@ -72,7 +72,7 @@ Status: **code done 2026-09-06** (previews in `sim/ambient-*.png`, all scenes un
 - [x] `app.py`: idle timer -> ambient after `deck.idle_minutes`; scenes rotate every `ambient.scene_minutes` in `ambient.scenes` order; any press wakes the board (never zooms); `ambient.fps` ceiling (8). `--ambient SCENE` starts in a scene for checking.
 - [x] Lock: `session.py` polls the input desktop every 5 s; two positives in a row (so a UAC prompt does not count) -> brightness 0 and no rendering; unlock restores brightness and the board. Night brightness unchanged (30% 22:00-07:00).
 - [x] `tools/calibrate.py`: circle, diagonals and cross drawn across the whole canvas on the real deck; keys 0/4 = gap -1/+1, 5/9 = -4/+4, 14 saves `deck.gap_px` to `config.local.toml`, 10 quits. `install_task.ps1` gained `-Stop` / `-Start` so the device can be freed for it.
-- [ ] **Gate (Wes):** free the deck (`tools\install_task.ps1 -Stop`, which also kills a hand-started copy), run `.venv\Scripts\python tools\calibrate.py`, adjust until the lines run straight through the bezels, press key 14 to save; then `-Start` (or run deck-dash by hand). The ticker and every scene use the saved gap on the next start.
+- [ ] **Gate (Wes):** with the deck free (nothing was running on the evening of 2026-09-06; once the task exists, `tools\install_task.ps1 -Stop` frees it and also kills a hand-started copy), run `.venv\Scripts\python tools\calibrate.py` in the main checkout, adjust until the lines run straight through the bezels, press key 14 to save; then register the task (Phase 2 gate) or `-Start`. The ticker and every scene use the saved gap on the next start.
 - [ ] Wes eyeballs the scenes on the hardware (idle 10 min, or `.venv\Scripts\python -m deckdash --ambient aquarium`).
 
 ## Phase 4 — alerts and the interesting buttons
@@ -87,4 +87,7 @@ Status: **code done 2026-09-06** (92 tests). Two gates for Wes (below).
 Out of scope by decision: audio-reactive bars.
 
 ## Merge and push
-Phases 2-4 are commits on `claude/sweet-mclean-8f59b9` (worktree). On "push it": fast-forward `main` to the branch and push; the main checkout then needs `git pull` before the scheduled task runs from it.
+- [x] Evening of 2026-09-06: `main` fast-forwarded to `406ba2e`, a merge of `claude/sweet-mclean-8f59b9` (Phases 2-4) that also folds in the Phase 1 hardware-review notes `main` had picked up meanwhile (a plain fast-forward was impossible because of that one commit). Local only: `main` is six commits ahead of `origin/main`. 92 tests pass on the merged tree. The main checkout has the code, the venv, and `config.local.toml`, so the scheduled task can run from it.
+- [ ] On "push it": `git push origin main`; then remove the worktrees `sweet-mclean-8f59b9` and `stoic-roentgen-a34d62` (`git worktree remove`, then `git worktree prune`; a folder that will not delete is held by the desktop-app tab whose cwd it was).
+
+Open gates, recommended order: calibrate (Phase 3) -> register the task (Phase 2) -> hooks (Phase 4, on Wes's word) -> eyeball the scenes and a toast -> push.
