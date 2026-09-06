@@ -86,6 +86,11 @@ Status: **code done 2026-09-06** (92 tests). Two gates for Wes (below).
 
 Out of scope by decision: audio-reactive bars.
 
+## Phase 5 — more scenes
+Requested by Wes on the evening of 2026-09-06 after seeing the five scenes on the hardware (spec: side view, R34 Skyline, rain on about half the showings, real glyph signs, sixth in the rotation).
+- [x] `ambient/tokyo.py` (`tokyo`): side-scrolling Tokyo night drive. Wrapping parallax strips (sky and stars; far skyline with Tokyo Tower, Skytree and a rail viaduct; neon facades with vertical and horizontal signs, shop fronts, rooftop screens; the wet street with lamps, crossings and pedestrians). An R34 Skyline GT-R in Bayside Blue holds the centre with spinning rims, tail-light glow and a headlight beam; a Yamanote train crosses the viaduct every 20-40 s; taxis overtake or get passed in the far lane; about half the showings are rainy (streaks, stronger sign reflections). Sign glyphs are MS Gothic words (Latin fallback without the font) and decorative like the matrix rain, so they cross bezels. About 1.2 ms per frame at 452x262. Appended as the sixth scene; 94 tests.
+- [ ] Wes eyeballs it on the hardware (`--ambient tokyo`).
+
 ## Merge and push
 - [x] Evening of 2026-09-06: `main` fast-forwarded to `406ba2e`, a merge of `claude/sweet-mclean-8f59b9` (Phases 2-4) that also folds in the Phase 1 hardware-review notes `main` had picked up meanwhile (a plain fast-forward was impossible because of that one commit). Local only: `main` is six commits ahead of `origin/main`. 92 tests pass on the merged tree. The main checkout has the code, the venv, and `config.local.toml`, so the scheduled task can run from it.
 - [ ] On "push it": `git push origin main`; then remove the worktrees `sweet-mclean-8f59b9` and `stoic-roentgen-a34d62` (`git worktree remove`, then `git worktree prune`; a folder that will not delete is held by the desktop-app tab whose cwd it was).

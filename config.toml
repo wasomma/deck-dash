@@ -20,7 +20,7 @@ off_on_lock = true     # deck dark while the Windows session is locked
 lock_poll_seconds = 5
 
 [ambient]
-scenes = ["weather", "plasma", "life", "matrix", "aquarium"]   # rotation order
+scenes = ["weather", "plasma", "life", "matrix", "aquarium", "tokyo"]   # rotation order
 scene_minutes = 5      # each scene runs this long before the next one
 fps = 8                # ceiling for full-deck animation (a 15-key repaint is 60 ms on the gen-1 deck)
 

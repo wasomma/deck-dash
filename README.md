@@ -39,7 +39,7 @@ headlines, one per column; pressing a column opens that story in the browser.
 
 After ten minutes without a press the deck plays ambient scenes (`[ambient]` in
 `config.toml`): weather (the sky outside, with the time and temperature), plasma, Conway's
-Life, Matrix rain and an aquarium, five minutes each. Any press brings the board back.
+Life, Matrix rain, an aquarium and a Tokyo night drive (an R34 Skyline through neon Shibuya), five minutes each. Any press brings the board back.
 Brightness drops to 30% from 22:00 to 07:00 and the deck goes dark while the Windows session
 is locked. `python -m deckdash --ambient aquarium` starts straight into a scene.
 

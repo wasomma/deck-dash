@@ -7,6 +7,7 @@ from .base import Scene
 from .life import LifeScene
 from .matrix import MatrixScene
 from .plasma import PlasmaScene
+from .tokyo import TokyoScene
 from .weather import WeatherScene
 
 SCENES: dict[str, type[Scene]] = {
@@ -15,6 +16,7 @@ SCENES: dict[str, type[Scene]] = {
     "life": LifeScene,
     "matrix": MatrixScene,
     "aquarium": AquariumScene,
+    "tokyo": TokyoScene,
 }
 
 
