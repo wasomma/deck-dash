@@ -37,6 +37,17 @@ string = dark key. The default board:
 Press any tile for its zoom view (10 s, any press returns). The news zoom shows five
 headlines, one per column; pressing a column opens that story in the browser.
 
+After ten minutes without a press the deck plays ambient scenes (`[ambient]` in
+`config.toml`): weather (the sky outside, with the time and temperature), plasma, Conway's
+Life, Matrix rain and an aquarium, five minutes each. Any press brings the board back.
+Brightness drops to 30% from 22:00 to 07:00 and the deck goes dark while the Windows session
+is locked. `python -m deckdash --ambient aquarium` starts straight into a scene.
+
+Bezel gap: the scenes and the ticker draw on a virtual canvas that includes the gaps between
+keys. Calibrate it once on the real deck with `.venv\Scripts\python tools\calibrate.py`
+(free the device first: `tools\install_task.ps1 -Stop`); key 14 saves `gap_px` to
+`config.local.toml`.
+
 Machine-local values go in `config.local.toml` (gitignored): the weather location (looked
 up once from the public IP and written automatically), the Bitaxe LAN address, and the
 `[vps]` block (an SSH alias plus one `[[vps.services]]` table per service with `name`,
@@ -64,7 +75,9 @@ overridden there key by key.
 - `deckdash/canvas.py`: virtual full-deck canvas including bezel gaps. Text never straddles
   a bezel (`Canvas.key_text`); only graphics may span keys. The marquee is the deliberate
   exception.
-- `deckdash/app.py`: the render loop.
-- `tools/install_task.ps1`: the logon task.
+- `deckdash/ambient/`: one file per scene; a scene paints the whole canvas per frame.
+- `deckdash/session.py`: Windows lock detection (polled).
+- `deckdash/app.py`: the render loop: board, zoom, ambient, locked.
+- `tools/install_task.ps1`: the logon task; `tools/calibrate.py`: bezel-gap calibration.
 
 Tests: `.venv\Scripts\python -m pytest -q`

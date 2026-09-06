@@ -3,6 +3,8 @@
 #   powershell -ExecutionPolicy Bypass -File tools\install_task.ps1          # register and start
 #   powershell -ExecutionPolicy Bypass -File tools\install_task.ps1 -Remove  # unregister
 #   powershell -ExecutionPolicy Bypass -File tools\install_task.ps1 -Status  # show task state
+#   powershell -ExecutionPolicy Bypass -File tools\install_task.ps1 -Stop    # stop the running copy (e.g. before tools\calibrate.py)
+#   powershell -ExecutionPolicy Bypass -File tools\install_task.ps1 -Start   # start it again
 #
 # Run it from your own terminal, not from a sandboxed shell: the check for hidapi.dll must
 # see the real file system. No admin rights are needed for a task in the user's own session.
@@ -10,13 +12,36 @@
 
 param(
     [switch]$Remove,
-    [switch]$Status
+    [switch]$Status,
+    [switch]$Stop,
+    [switch]$Start
 )
 
 $ErrorActionPreference = 'Stop'
 $taskName = 'deck-dash'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $python = Join-Path $root '.venv\Scripts\pythonw.exe'
+
+function Stop-DeckDashProcesses {
+    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*-m deckdash*' -and $_.Name -like 'python*' } | ForEach-Object {
+        Write-Host ("stopping pid " + $_.ProcessId)
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+if ($Stop) {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Stop-DeckDashProcesses
+    Write-Host 'deck-dash stopped'
+    exit 0
+}
+
+if ($Start) {
+    Start-ScheduledTask -TaskName $taskName
+    Start-Sleep -Seconds 2
+    Write-Host ("state: " + (Get-ScheduledTask -TaskName $taskName).State)
+    exit 0
+}
 
 if ($Status) {
     $t = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -70,10 +95,7 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Se
 Write-Host "registered task '$taskName' (at logon, restart every 1 min on failure, up to 99 times)"
 
 # Stop any copy started by hand so the task's instance owns the device.
-Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*-m deckdash*' } | ForEach-Object {
-    Write-Host ("stopping pid " + $_.ProcessId + " (" + $_.CommandLine + ")")
-    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-}
+Stop-DeckDashProcesses
 Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 3

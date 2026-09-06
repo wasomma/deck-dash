@@ -15,7 +15,14 @@ anim_fps = 8           # animated tiles (weather icon, pickaxe, pulsing CI dot)
 clock_fps = 4          # sweeping second hand
 flush_budget_ms = 60   # max time per tick spent sending key images; measured: a full 15-key repaint takes 60 ms
 zoom_seconds = 10
-idle_minutes = 10      # ambient mode after this much idle time (Phase 3)
+idle_minutes = 10      # ambient scenes after this long without a key press; 0 disables them
+off_on_lock = true     # deck dark while the Windows session is locked
+lock_poll_seconds = 5
+
+[ambient]
+scenes = ["weather", "plasma", "life", "matrix", "aquarium"]   # rotation order
+scene_minutes = 5      # each scene runs this long before the next one
+fps = 8                # ceiling for full-deck animation (a 15-key repaint is 60 ms on the gen-1 deck)
 
 [clock]
 twelve_hour = true

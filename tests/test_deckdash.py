@@ -10,6 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from deckdash import config, gfx, wx_icons  # noqa: E402
+from deckdash.ambient import SCENES, make_scene  # noqa: E402
 from deckdash.app import App  # noqa: E402
 from deckdash.canvas import Canvas  # noqa: E402
 from deckdash.device import SimDeck  # noqa: E402
@@ -390,6 +391,104 @@ def test_local_override_keeps_arrays_of_tables(tmp_path):
     assert cfg["vps"]["ssh_host"] == "box"
     assert [s["name"] for s in cfg["vps"]["services"]] == ["a", "b"]
     assert cfg["weather"]["place"] == "X"
+
+
+# --- ambient -------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", sorted(SCENES))
+def test_scene_frames_are_full_deck(cfg, sources, empty_sources, name):
+    for srcs in (sources, empty_sources):
+        scene = make_scene(name, cfg, srcs, seed=3)
+        t0 = time.time()
+        for k in range(12):
+            images = scene.frame(t0 + k / scene.fps)
+            assert len(images) == 15
+            for img in images:
+                _assert_key(img)
+        # Something moved between the first and last frame.
+        first = make_scene(name, cfg, srcs, seed=3).frame(t0)
+        assert any(a.tobytes() != b.tobytes() for a, b in zip(first, images))
+
+
+@pytest.mark.parametrize("name", sorted(SCENES))
+def test_scene_frame_time(cfg, sources, name):
+    scene = make_scene(name, cfg, sources, seed=1)
+    t0 = time.time()
+    scene.frame(t0)
+    start = time.perf_counter()
+    for k in range(1, 9):
+        scene.frame(t0 + k / scene.fps)
+    ms = (time.perf_counter() - start) / 8 * 1000
+    assert ms < 250, f"{name}: {ms:.0f} ms per frame"
+
+
+def test_weather_scene_every_condition(cfg):
+    for code in (0, 2, 3, 45, 55, 65, 75, 95):
+        st = weather_state()
+        st["current"]["code"] = code
+        srcs = {"weather": StaticSource(st)}
+        scene = make_scene("weather", cfg, srcs, seed=2)
+        for k in range(4):
+            assert len(scene.frame(time.time() + k)) == 15
+
+
+def test_app_idle_to_ambient_and_wake(cfg, sources, tmp_path):
+    cfg["deck"]["idle_minutes"] = 0.1 / 60  # 0.1 s
+    cfg["deck"]["off_on_lock"] = False
+    deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
+    app = App(cfg, deck, sources=sources)
+    app.start()
+    app.tick()
+    assert app.mode == "board"
+    time.sleep(0.15)
+    app.tick()
+    assert app.mode == "ambient" and app.scene is not None and app.scene.name == "weather"
+    sent = deck.sent
+    app.scene_next = 0.0
+    app.tick()
+    assert deck.sent > sent  # scenes repaint the whole deck
+    app._on_press(6, True)
+    app.tick()
+    assert app.mode == "board" and app.zoom is None  # a wake press never zooms
+    app.stop()
+
+
+def test_app_scene_rotation(cfg, sources, tmp_path):
+    cfg["deck"]["idle_minutes"] = 0.1 / 60
+    cfg["deck"]["off_on_lock"] = False
+    cfg["ambient"]["scene_minutes"] = 0.05 / 60
+    deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
+    app = App(cfg, deck, sources=sources)
+    app.start()
+    time.sleep(0.15)
+    app.tick()
+    names = [app.scene.name]
+    for _ in range(4):
+        time.sleep(0.06)
+        app.tick()
+        names.append(app.scene.name)
+    assert names == ["weather", "plasma", "life", "matrix", "aquarium"]
+    app.stop()
+
+
+def test_app_lock_turns_deck_off(cfg, sources, tmp_path):
+    cfg["deck"]["lock_poll_seconds"] = 0
+    deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
+    app = App(cfg, deck, sources=sources)
+    locked = {"v": True}
+    app.lock_check = lambda: locked["v"]
+    app.start()
+    app.tick()
+    assert app.mode == "board"  # one positive poll is not enough
+    app.tick()
+    assert app.mode == "locked" and deck.brightness == 0
+    sent = deck.sent
+    app.tick()
+    assert deck.sent == sent  # nothing is rendered while locked
+    locked["v"] = False
+    app.tick()
+    assert app.mode == "board" and deck.brightness == app.brightness
+    app.stop()
 
 
 def test_fmt_helpers():

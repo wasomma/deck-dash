@@ -66,7 +66,13 @@ reboots in the last 30 days (the latter are Kernel-Power 41 with BugcheckCode 0,
 takes about 4 s in parallel; the SSH probe about 1 s; wevtutil 20 ms.
 
 ## Phase 3 — ambient
-- [ ] Bezel-gap calibration (`--gap`), weather-as-ambient, plasma, Life, Matrix rain, aquarium; idle 10 min; off on lock.
+Status: **code done 2026-09-06** (previews in `sim/ambient-*.png`, all scenes under 3 ms per frame at 456x264). Gap calibration is a gate for Wes (below).
+- [x] `ambient/` package: `Scene` base (fresh instance per showing, `frame(now)` -> 15 keys), scenes `weather` (sky by real sunrise/sunset, clouds drift with the wind, rain/snow/fog/lightning by condition, time/temp/date in dark pills inside single keys), `plasma` (numpy sine fields, quarter-res, palette per showing), `life` (8 px cells, age colour, reseeds when still), `matrix` (half-width katakana from MS Gothic, sprite atlas), `aquarium` (six fish, bubbles, weeds, crab).
+- [x] `app.py`: idle timer -> ambient after `deck.idle_minutes`; scenes rotate every `ambient.scene_minutes` in `ambient.scenes` order; any press wakes the board (never zooms); `ambient.fps` ceiling (8). `--ambient SCENE` starts in a scene for checking.
+- [x] Lock: `session.py` polls the input desktop every 5 s; two positives in a row (so a UAC prompt does not count) -> brightness 0 and no rendering; unlock restores brightness and the board. Night brightness unchanged (30% 22:00-07:00).
+- [x] `tools/calibrate.py`: circle, diagonals and cross drawn across the whole canvas on the real deck; keys 0/4 = gap -1/+1, 5/9 = -4/+4, 14 saves `deck.gap_px` to `config.local.toml`, 10 quits. `install_task.ps1` gained `-Stop` / `-Start` so the device can be freed for it.
+- [ ] **Gate (Wes):** free the deck (`tools\install_task.ps1 -Stop`, which also kills a hand-started copy), run `.venv\Scripts\python tools\calibrate.py`, adjust until the lines run straight through the bezels, press key 14 to save; then `-Start` (or run deck-dash by hand). The ticker and every scene use the saved gap on the next start.
+- [ ] Wes eyeballs the scenes on the hardware (idle 10 min, or `.venv\Scripts\python -m deckdash --ambient aquarium`).
 
 ## Phase 4 — alerts and the interesting buttons
 - [ ] Toast overlay; Claude-needs-you tile via hooks (gate: `settings.json` edit through the update-config skill); now-playing tile (Windows media session API).

@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", default=None, help="path to config.toml")
     p.add_argument("--hidapi", default=None, help="folder containing hidapi.dll (overrides config)")
     p.add_argument("--gap", type=int, default=None, help="bezel gap in px (overrides config)")
+    p.add_argument("--ambient", default=None, metavar="SCENE", help="start in this ambient scene and return to it 5 s after any press")
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--version", action="version", version=f"deckdash {__version__}")
     args = p.parse_args(argv)
@@ -82,7 +83,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         deck = RealDeck(hidapi_dir=args.hidapi or dk.get("hidapi_dir"), brightness=int(dk.get("brightness", 80)))
         open_with_retry(deck)
+    if args.ambient is not None:
+        dk["idle_minutes"] = 5 / 60
     app = App(cfg, deck)
+    if args.ambient is not None:
+        app.forced_scene = args.ambient
+        app.start_ambient(time.time(), args.ambient)
     log.info("deckdash %s starting (%s)", __version__, "simulator" if args.sim else "hardware")
     app.run(max_seconds=args.seconds or None)
     return 0
