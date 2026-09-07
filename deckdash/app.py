@@ -385,10 +385,11 @@ class App:
         deck that never arrives is visible rather than silent), and until the loop turns nothing
         drains the queue. ``status`` is a read of attributes nothing is mutating yet, so it is
         answered here instead of after the timeout - it is how a client finds out what is wrong;
-        anything that would drive the board says why it cannot."""
+        so is ``quit``, which is the way out of a wait that would otherwise never end and must never
+        be a dead menu item in the tray. Anything that would drive the board says why it cannot."""
         if not self.deck.opened:
-            if cmd == "status":
-                return {"ok": True, **self.status(time.time())}
+            if cmd in ("status", "quit"):
+                return self.command(cmd, list(args))
             return {"ok": False, "error": f"the deck is not open yet, so '{cmd}' has nothing to drive"}
         req = Request(cmd, list(args))
         self.commands.put(req)

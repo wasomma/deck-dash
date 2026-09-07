@@ -197,6 +197,8 @@ def test_the_faces_before_the_deck_is_open(cfg, sources, tmp_path):
     r = app.submit("next", [])
     assert not r["ok"] and "not open yet" in r["error"] and app.scene is None
     assert app.commands.empty()  # neither call left a request behind for a loop that is not running
+    assert app.submit("quit", [])["ok"] and app.stopping  # the tray's Quit is the way out of the wait
+    app._stop = False
     app.start()
     assert deck.opened and app.mode == "board" and app.tray_state() == "on"
     assert app.command("status", [])["deck"] == {"type": "SimDeck", "open": True}

@@ -347,6 +347,56 @@ def test_write_local_leaves_no_temp_copy_behind(tmp_path, monkeypatch):
     assert not tmp.exists(), "a copy of the personal config was left in the tree"
     monkeypatch.setattr(dd_config.os, "replace", real)
     assert dd_config.load(ROOT / "config.toml", local)["weather"]["place"] == "Placeville"
+class _RecordingTray:  # pystray for real would put an icon in Wes's tray during the test run
+    """Records what main() does with the tray into the ``order`` list handed to ``run_main``."""
+
+    order: list = []
+
+    def __init__(self, app, root, url):
+        self.url = url
+
+    def start(self):
+        _RecordingTray.order.append("tray")
+
+    def stop(self):
+        _RecordingTray.order.append("tray stopped")
+
+
+def run_main(cfg, tmp_path, monkeypatch, deck_factory, order, run_loop=None):
+    """Start main() on a thread against ``deck_factory``, with everything that would touch the real
+    machine stubbed: the mutex the live task holds, the repo's log file, this process's priority,
+    the tray icon, and App.run - which never runs here, so no source ever starts a poll."""
+    conf = copy.deepcopy(cfg)
+    pipe = f"deckdash-test-{os.getpid()}-{time.monotonic_ns()}"  # its own pipe and an OS-picked port: the live app keeps its own
+    conf["ui"] = {"tray": True, "pipe": pipe, "dashboard_port": 0}
+    conf_path = tmp_path / "config.toml"
+    dd_config.write_local(conf, conf_path)  # the whole dict written back out as TOML
+
+    boards: list = []
+    real_dashboard = main_mod.Dashboard
+
+    def _dashboard(app, port):
+        boards.append(real_dashboard(app, port))
+        return boards[-1]
+
+    _RecordingTray.order = order
+    monkeypatch.setattr(dd_config, "LOCAL_CONFIG", tmp_path / "no-such-local.toml")
+    monkeypatch.setattr(main_mod, "setup_logging", lambda verbose: None)  # no handler on the repo's log
+    monkeypatch.setattr(main_mod, "normal_priority", lambda: "priority test")  # leave pytest's own process alone
+    monkeypatch.setattr(main_mod, "job_summary", lambda: "none")
+    monkeypatch.setattr(main_mod, "single_instance", lambda *a, **k: True)  # the live task holds the real mutex
+    monkeypatch.setattr(main_mod, "RealDeck", lambda **kw: deck_factory())
+    monkeypatch.setattr(main_mod, "Tray", _RecordingTray)
+    monkeypatch.setattr(main_mod, "Dashboard", _dashboard)
+    monkeypatch.setattr(main_mod.App, "run", run_loop or (lambda self, max_seconds=None: order.append("run")))
+
+    # daemon: if the quit path ever breaks, a failing test must not leave a thread waiting for a
+    # deck for ever and wedge pytest at exit.
+    t = threading.Thread(target=lambda: order.append(f"exit {main_mod.main(['--config', str(conf_path)])}"), daemon=True)
+    t.start()
+    return t, pipe, boards
+
+
 def test_the_faces_are_up_before_the_deck(cfg, tmp_path, monkeypatch):
     """main() used to open the deck first, and open_with_retry waits for ever, so a missing
     hidapi.dll or a deck another process already held gave no tray, no dashboard, no pipe and no
@@ -364,41 +414,7 @@ def test_the_faces_are_up_before_the_deck(cfg, tmp_path, monkeypatch):
             assert release.wait(10), "the test never released the open"
             super().open()
 
-    class _RecordingTray:  # pystray for real would put an icon in Wes's tray during the test run
-        def __init__(self, app, root, url):
-            self.url = url
-
-        def start(self):
-            order.append("tray")
-
-        def stop(self):
-            order.append("tray stopped")
-
-    conf = copy.deepcopy(cfg)
-    pipe = f"deckdash-test-faces-{os.getpid()}"  # its own pipe and an OS-picked port: the live app keeps its own
-    conf["ui"] = {"tray": True, "pipe": pipe, "dashboard_port": 0}
-    conf_path = tmp_path / "config.toml"
-    dd_config.write_local(conf, conf_path)  # the whole dict written back out as TOML
-
-    boards: list = []
-    real_dashboard = main_mod.Dashboard
-
-    def _dashboard(app, port):
-        boards.append(real_dashboard(app, port))
-        return boards[-1]
-
-    monkeypatch.setattr(dd_config, "LOCAL_CONFIG", tmp_path / "no-such-local.toml")
-    monkeypatch.setattr(main_mod, "setup_logging", lambda verbose: None)  # no handler on the repo's log
-    monkeypatch.setattr(main_mod, "normal_priority", lambda: "priority test")  # leave pytest's own process alone
-    monkeypatch.setattr(main_mod, "job_summary", lambda: "none")
-    monkeypatch.setattr(main_mod, "single_instance", lambda *a, **k: True)  # the live task holds the real mutex
-    monkeypatch.setattr(main_mod, "RealDeck", lambda **kw: _LateDeck(gap=24, out_dir=tmp_path, interval=1e9))
-    monkeypatch.setattr(main_mod, "Tray", _RecordingTray)
-    monkeypatch.setattr(main_mod, "Dashboard", _dashboard)
-    monkeypatch.setattr(main_mod.App, "run", lambda self, max_seconds=None: order.append("run"))  # no source ever starts
-
-    t = threading.Thread(target=lambda: order.append(f"exit {main_mod.main(['--config', str(conf_path)])}"))
-    t.start()
+    t, pipe, boards = run_main(cfg, tmp_path, monkeypatch, lambda: _LateDeck(gap=24, out_dir=tmp_path, interval=1e9), order)
     try:
         assert reached.wait(10), "main never got as far as opening the deck"
         r = send("status", [], pipe=pipe, timeout=5)
@@ -415,3 +431,31 @@ def test_the_faces_are_up_before_the_deck(cfg, tmp_path, monkeypatch):
         t.join(15)
     assert not t.is_alive()
     assert order == ["tray", "deck", "run", "tray stopped", "exit 0"]
+
+
+def test_quit_gets_out_of_the_wait(cfg, tmp_path, monkeypatch):
+    """The wait for a deck that never arrives is endless, and the tray, the page and ctl are all
+    serving by then, so their Quit has to reach it - otherwise the only way to be rid of a grey
+    tray icon is Task Manager. open_with_retry checks the stop flag every 0.2 s between attempts."""
+    order: list = []
+    tries = []
+
+    class _AbsentDeck(SimDeck):
+        def open(self):
+            tries.append(time.time())
+            raise RuntimeError("no Stream Deck found")
+
+    t, pipe, _ = run_main(cfg, tmp_path, monkeypatch, lambda: _AbsentDeck(gap=24, out_dir=tmp_path, interval=1e9), order)
+    try:
+        for _ in range(100):  # the pipe is up before the first open attempt; give the thread a moment
+            if tries:
+                break
+            time.sleep(0.05)
+        assert tries, "main never tried to open the deck"
+        assert send("quit", [], pipe=pipe, timeout=5)["ok"]
+        t.join(10)
+    finally:
+        if t.is_alive():  # a failure here would leave a thread waiting for a deck for ever
+            send("quit", [], pipe=pipe, timeout=5)
+            t.join(10)
+    assert not t.is_alive() and order == ["tray", "tray stopped", "exit 0"]  # never reached App.run

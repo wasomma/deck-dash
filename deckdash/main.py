@@ -6,6 +6,7 @@ import logging
 import logging.handlers
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from . import __version__, config, dashboard
@@ -123,18 +124,27 @@ def job_summary() -> str:
     return f"limit flags 0x{basic.LimitFlags:x}, scheduling class {basic.SchedulingClass}, cpu rate control {rate}"
 
 
-def open_with_retry(deck: RealDeck, retry_s: float = 10.0) -> None:
-    """Wait for the deck rather than crash: at logon the USB stack may still be waking up."""
+def open_with_retry(deck: RealDeck, retry_s: float = 10.0, stop: Callable[[], bool] | None = None) -> bool:
+    """Wait for the deck rather than crash: at logon the USB stack may still be waking up.
+
+    False when ``stop`` asked us to give up. The tray, the page and ``ctl`` are already serving by
+    the time this runs, so their Quit has to reach it: the wait is otherwise endless and the only
+    way out would be Task Manager. The sleep is sliced for the same reason."""
     attempt = 0
     while True:
         try:
             deck.open()
-            return
+            return True
         except Exception as exc:  # noqa: BLE001
             attempt += 1
             if attempt in (1, 6, 30) or attempt % 360 == 0:
                 log.warning("deck not available (attempt %d): %s", attempt, exc)
-            time.sleep(retry_s)
+            waited = 0.0
+            while waited < retry_s:
+                if stop is not None and stop():
+                    return False
+                time.sleep(min(0.2, retry_s - waited))
+                waited += 0.2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -198,7 +208,9 @@ def main(argv: list[str] | None = None) -> int:
         # no tray, no dashboard and no crash - total silence. Now the tray is grey, the page says
         # "waiting for the deck", `deckdash ctl status` answers, and the log names each attempt.
         if not args.sim:
-            open_with_retry(deck)
+            if not open_with_retry(deck, stop=lambda: app.stopping):
+                log.info("quit while waiting for the deck")
+                return 0  # the finally below still stops the tray, the page and the pipe
             if deck.key_count != len(app.slots):  # a deck that is not the 15-key default
                 app.slots = build_slots(cfg.get("layout", {}).get("keys", []), deck.key_count, cfg, app.sources)
         app.run(max_seconds=args.seconds or None)
