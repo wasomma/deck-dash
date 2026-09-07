@@ -15,7 +15,7 @@ Status: **done 2026-09-06.** `hidapi.dll` 0.15.0 x64 (166,912 bytes) installed i
 - [x] `tools/bench.py` written: identity, ms per key, ms per full frame, key-press echo.
 - [x] Run on the unit; numbers below. `flush_budget_ms = 60` covers a full repaint in one tick.
 
-Results (serial AL19H1A00539, firmware 1.0.191203, BMP 72x72 flipped both axes):
+Results (firmware 1.0.191203, BMP 72x72 flipped both axes):
 
 | Measure | Value |
 |---|---|
@@ -172,7 +172,7 @@ in place. Pid 18356 before and after, so the in-process path is what ran.
 - 12:50:49 `deck write failed, will reconnect: Failed to write out report (-1)` - the transport error
   caught in `RealDeck._send`; one slow tick (flush 1042 ms) for the failing write.
 - 12:50:53-12:57:56 asleep. NVML and the Bitaxe went unreachable too.
-- 12:57:59 `deck open:` with the same serial AL19H1A00539 - `_maybe_reconnect` caught it about three
+- 12:57:59 `deck open:` reporting the same serial as before the suspend - `_maybe_reconnect` caught it about three
   seconds after resume, inside its 5 s retry. One slow tick (flush 2494 ms) for the reconnect plus the
   full repaint that `invalidate()` forces. 12:58:01 the scene resumed by itself.
 - Everything downstream came back too: `MINER OFFLINE` on the way down and `MINER BACK 1.06T` thirteen
@@ -199,6 +199,15 @@ Three commits plus a PHASES pair, pushed to `origin/main` 2026-09-07 14:12 (7954
   the key, single quotes, duplicate lines, trailing comment, neither - with the function *and* the
   fallback chain extracted from the script rather than retyped: all seven pass. Parse-checked with
   `ParseFile`, ASCII-clean, CRLF intact.
+  Exercised for real 2026-09-07 14:47, which until then it never had been: Wes added
+  `hidapi_dir` to the `[deck]` table of `config.local.toml`, checked the file still parsed with
+  `deckdash ctl reload` before anything depended on it (an unparsable local config is read at every
+  start and would leave the deck dark at the next logon with the task retrying every minute), and
+  re-registered from his own terminal. The preflight line read **`hidapi.dll : 166912 bytes at
+  C:\...\hidapi\hidapi.dll (from config.local.toml)`** - `(from config.toml)` before. The task
+  re-registered, the old copy was stopped and the deck came back at 14:47:14 on the same serial,
+  mode board, 0 slow ticks. The tracked `config.toml` was left alone, so the repo still pulls clean
+  and its path is only the fallback.
 - [x] `main()` opened the deck before it built the `App` and started the three faces, and
   `open_with_retry` waits for ever by design (at logon the USB stack may still be waking up), so a
   missing hidapi.dll or a deck another process already held gave no tray, no dashboard, no pipe and
@@ -253,7 +262,7 @@ Three commits plus a PHASES pair, pushed to `origin/main` 2026-09-07 14:12 (7954
   deck is not open yet, so 'scene' has nothing to drive", exit 1. Then `ctl quit` answered `ok` and
   the process was gone 116 ms later (`quit requested` 14:15:10,004, `quit while waiting for the
   deck` 14:15:10,120), leaving no python process and no tray icon. `install_task.ps1 -Start` brought
-  the deck back at 14:15:22 on the same serial AL19H1A00539, mode board, 0 slow ticks. Not confirmed
+  the deck back at 14:15:22 on the same serial, mode board, 0 slow ticks. Not confirmed
   visually: that the tray icon was actually grey rather than green - the API said `tray_state off`,
   which is the value the icon is drawn from, but nobody looked at it.
 
@@ -275,4 +284,4 @@ thread dump on roughly two runs in three, and the suite still reports all green.
 changes - it reproduces with the 125 pre-existing tests and the new ones deselected - so a future
 session should not read it as a regression from them.
 
-Status at hand-off, 2026-09-07 14:30: **Phase 7 is done and the three follow-up fixes are done.** Phase 7 (the `deckdash` command, the named-pipe control channel, the tray, and the localhost dashboard in its Edge app-mode window) was verified on the deck, reviewed adversarially twice, merged and pushed, and the sleep/wake reconnect path has since been verified too. On top of that: `install_task.ps1` honours `hidapi_dir` from `config.local.toml`; `main()` starts the tray, the dashboard and the pipe before it waits for the deck, so a deck that never arrives is visible instead of silent, and `quit` reaches that wait; and the README gained a "A second machine" section. All four are verified, the waiting state on the hardware. 128 tests pass. `origin/main` is at c1c4b75 and the main checkout is level with it, so **all four are live under the task** (restarted 14:24:48; two tokyo minutes at 13.9 fps, flush avg 62 ms, 0 slow ticks). No re-registration was needed - the action is still `.venv\Scripts\deckdashw.exe` and the editable install points at the checkout - but a restart is what loads new code after a pull. Open: the hardware check of the waiting state (above), which needs Wes at the machine. Worth knowing for whatever comes next: `config.write_local` cannot delete a key from a table (it merges), which is why a blank overlay value means "no overlay"; it writes through a temp file and re-parses before replacing, because `config.local.toml` is read at every start and one unparsable write would leave the deck dark at the next logon; and `RealDeck.opened` means "has been opened", not "the handle is live" - a transport error leaves it true, which is what lets the new waiting state stay quiet through a suspend. What is left is first use, not defects: the `install_task.ps1` fix has never actually run on this machine, because `config.local.toml` here holds no `hidapi_dir` and the lookup falls back to `config.toml` - moving that one line across and re-registering from Wes's own terminal is what exercises it; and the README's second-machine section is unproven until someone walks it on the second PC. Also unconfirmed, deliberately: that the waiting tray icon is visibly grey. Housekeeping: two worktrees to remove (`peaceful-bose-9f4101`, idle, and this one) and their merged branches to delete.
+Status at hand-off, 2026-09-07 14:50: **Phase 7 is done and the three follow-up fixes are done.** Phase 7 (the `deckdash` command, the named-pipe control channel, the tray, and the localhost dashboard in its Edge app-mode window) was verified on the deck, reviewed adversarially twice, merged and pushed, and the sleep/wake reconnect path has since been verified too. On top of that: `install_task.ps1` honours `hidapi_dir` from `config.local.toml`; `main()` starts the tray, the dashboard and the pipe before it waits for the deck, so a deck that never arrives is visible instead of silent, and `quit` reaches that wait; and the README gained a "A second machine" section. All four are verified, the waiting state on the hardware. 128 tests pass. `origin/main` is at c1c4b75 and the main checkout is level with it, so **all four are live under the task** (restarted 14:24:48; two tokyo minutes at 13.9 fps, flush avg 62 ms, 0 slow ticks). No re-registration was needed - the action is still `.venv\Scripts\deckdashw.exe` and the editable install points at the checkout - but a restart is what loads new code after a pull. Open: the hardware check of the waiting state (above), which needs Wes at the machine. Worth knowing for whatever comes next: `config.write_local` cannot delete a key from a table (it merges), which is why a blank overlay value means "no overlay"; it writes through a temp file and re-parses before replacing, because `config.local.toml` is read at every start and one unparsable write would leave the deck dark at the next logon; and `RealDeck.opened` means "has been opened", not "the handle is live" - a transport error leaves it true, which is what lets the new waiting state stay quiet through a suspend. What is left is first use, not defects: the `install_task.ps1` lookup has now been exercised end to end here (Wes moved `hidapi_dir` into `config.local.toml` and re-registered at 14:47; the preflight said `(from config.local.toml)`), so the only unproven piece is the README's second-machine section, which stays unproven until someone walks it on the second PC. Also unconfirmed, deliberately: that the waiting tray icon is visibly grey. Housekeeping done 2026-09-07 14:35 on "archive them": the idle `peaceful-bose-9f4101` session archived and its worktree and branch removed, leaving only `main` and the session worktree this was written from. That last one goes when its session is archived, which cleans up the worktree with it.

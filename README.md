@@ -9,8 +9,10 @@ software is not needed and must not be running.
 ## Setup
 
 1. `python -m venv .venv` then `.venv\Scripts\python -m pip install -r requirements.txt`
-2. Put `hidapi.dll` (x64, from the libusb/hidapi GitHub releases, `hidapi-win.zip`) in
-   `C:\Users\WesF\Desktop\Dev\Tools\hidapi\` (path configurable as `deck.hidapi_dir`).
+2. Put `hidapi.dll` (x64, from the libusb/hidapi GitHub releases, `hidapi-win.zip`) in the
+   folder `deck.hidapi_dir` names - `C:\Tools\hidapi` by default. To keep it somewhere else,
+   override that key in `config.local.toml` rather than editing the tracked `config.toml`;
+   `install_task.ps1` reads the local file first.
 3. Benchmark the unit once: `.venv\Scripts\python tools\bench.py`
 4. Run: `.venv\Scripts\python -m deckdash`
 5. Run at logon (per-user Task Scheduler entry, restarts on failure, no admin needed), from

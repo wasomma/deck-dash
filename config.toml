@@ -4,7 +4,7 @@
 # first run. Any table here can be overridden there, key by key.
 
 [deck]
-hidapi_dir = "C:/Users/WesF/Desktop/Dev/Tools/hidapi"   # folder holding hidapi.dll (x64)
+hidapi_dir = "C:/Tools/hidapi"   # folder holding hidapi.dll (x64); put your own path in config.local.toml
 brightness = 80
 night_brightness = 30
 night_start = "22:00"
