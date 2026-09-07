@@ -798,3 +798,12 @@ def test_slow_tick_is_logged_once_per_10s(cfg, sources, tmp_path, caplog, monkey
     assert "flush" in msgs[0] and "board" in msgs[0]
     assert app._fps_slow == 2 and app._slow_suppressed == 1
     app.stop()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows process attributes")
+def test_normal_priority_reports_class_and_memory_priority():
+    from deckdash.main import job_summary, normal_priority
+
+    s = normal_priority()
+    assert s.startswith("priority normal") and "memory priority 5" in s
+    assert isinstance(job_summary(), str)

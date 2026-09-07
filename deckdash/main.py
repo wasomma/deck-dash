@@ -47,24 +47,68 @@ def single_instance(name: str = "Local\\deck-dash") -> bool:
 _PRIORITY_NAMES = {0x40: "idle", 0x4000: "below normal", 0x20: "normal", 0x8000: "above normal", 0x80: "high", 0x100: "realtime"}
 
 
-def normal_priority() -> str:
-    """Raise a below-normal or idle process to normal and return the resulting class name.
+class _MemoryPriority(ctypes.Structure):
+    _fields_ = [("MemoryPriority", ctypes.c_ulong)]
 
-    Task Scheduler starts tasks at below normal (priority 7) unless told otherwise; measured on
-    2026-09-06 that starved the render loop (flush max 150-320 ms once a minute, 66-72 ms at normal).
-    ``install_task.ps1`` registers with priority 5 (normal); this covers an older registration.
+
+class _JobBasicLimits(ctypes.Structure):
+    _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", ctypes.c_ulong), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.c_ulong),
+                ("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.c_ulong), ("SchedulingClass", ctypes.c_ulong)]
+
+
+class _JobCpuRate(ctypes.Structure):
+    _fields_ = [("ControlFlags", ctypes.c_ulong), ("CpuRate", ctypes.c_ulong)]
+
+
+def normal_priority() -> str:
+    """Bring the process to normal CPU class and normal memory priority; say what was found and set.
+
+    Task Scheduler launches tasks at below-normal CPU priority (7) unless told otherwise, and even at
+    priority 5 its processes get memory priority 4 instead of 5. Measured on 2026-09-06: the former
+    starved the flush under load (150-320 ms spikes); the latter made an idle board-mode process log
+    100-140 ms flushes (2-5 a minute) that a shell-launched copy never showed. ``install_task.ps1``
+    registers with priority 5; this covers the rest and older registrations.
     """
     if sys.platform != "win32":
         return "n/a"
-    kernel32 = ctypes.windll.kernel32
-    kernel32.GetCurrentProcess.restype = ctypes.c_void_p  # the pseudo handle is -1: keep all 64 bits
-    kernel32.GetPriorityClass.argtypes = [ctypes.c_void_p]
-    kernel32.GetPriorityClass.restype = ctypes.c_uint
-    kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint]
-    proc = kernel32.GetCurrentProcess()
-    if kernel32.GetPriorityClass(proc) in (0x4000, 0x40):
-        kernel32.SetPriorityClass(proc, 0x20)
-    return _PRIORITY_NAMES.get(kernel32.GetPriorityClass(proc), "unknown")
+    k = ctypes.windll.kernel32
+    k.GetCurrentProcess.restype = ctypes.c_void_p  # the pseudo handle is -1: keep all 64 bits
+    k.GetPriorityClass.argtypes = [ctypes.c_void_p]
+    k.GetPriorityClass.restype = ctypes.c_uint
+    k.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    k.GetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+    k.SetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+    proc = k.GetCurrentProcess()
+    was_class = _PRIORITY_NAMES.get(k.GetPriorityClass(proc), "unknown")
+    if k.GetPriorityClass(proc) in (0x4000, 0x40):
+        k.SetPriorityClass(proc, 0x20)
+    now_class = _PRIORITY_NAMES.get(k.GetPriorityClass(proc), "unknown")
+    mem = _MemoryPriority(0)
+    k.GetProcessInformation(proc, 0, ctypes.byref(mem), ctypes.sizeof(mem))  # 0 = ProcessMemoryPriority
+    was_mem = mem.MemoryPriority
+    if 0 < was_mem < 5:
+        mem.MemoryPriority = 5  # MEMORY_PRIORITY_NORMAL
+        k.SetProcessInformation(proc, 0, ctypes.byref(mem), ctypes.sizeof(mem))
+        k.GetProcessInformation(proc, 0, ctypes.byref(mem), ctypes.sizeof(mem))
+    return f"priority {now_class} (was {was_class}), memory priority {mem.MemoryPriority} (was {was_mem})"
+
+
+def job_summary() -> str:
+    """Limits of the job object this process runs in (Task Scheduler puts tasks in one), for the log."""
+    if sys.platform != "win32":
+        return "n/a"
+    k = ctypes.windll.kernel32
+    k.QueryInformationJobObject.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p]
+    basic = _JobBasicLimits()
+    if not k.QueryInformationJobObject(None, 2, ctypes.byref(basic), ctypes.sizeof(basic), None):  # 2 = basic limits
+        return "none"
+    cpu = _JobCpuRate()
+    rate = "n/a"
+    if k.QueryInformationJobObject(None, 15, ctypes.byref(cpu), ctypes.sizeof(cpu), None):  # 15 = CPU rate control
+        rate = f"0x{cpu.ControlFlags:x}/{cpu.CpuRate}"
+    return f"limit flags 0x{basic.LimitFlags:x}, scheduling class {basic.SchedulingClass}, cpu rate control {rate}"
 
 
 def open_with_retry(deck: RealDeck, retry_s: float = 10.0) -> None:
@@ -112,6 +156,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.ambient is not None:
         app.forced_scene = args.ambient
         app.start_ambient(time.time(), args.ambient)
-    log.info("deckdash %s starting (%s), priority %s", __version__, "simulator" if args.sim else "hardware", normal_priority())
+    log.info("deckdash %s starting (%s), %s; job: %s", __version__, "simulator" if args.sim else "hardware", normal_priority(), job_summary())
     app.run(max_seconds=args.seconds or None)
     return 0
