@@ -157,7 +157,7 @@ def test_a_busy_port_is_a_warning_not_a_failure(cfg, sources, tmp_path):
 def test_save_writes_reloads_and_reports_a_restart(cfg, sources, tmp_path, monkeypatch):
     app, deck = make_app(cfg, sources, tmp_path)
     local = tmp_path / "config.local.toml"
-    dd_config.write_local({"weather": {"latitude": 38.36, "place": "somewhere"}}, local)
+    dd_config.write_local({"weather": {"latitude": 12.34, "place": "somewhere"}}, local)
     monkeypatch.setattr(dd_config, "LOCAL_CONFIG", local)
     app.config_loader = lambda: dd_config._merge(copy.deepcopy(cfg), dd_config.load(ROOT / "config.toml", local))
     board = serve(app, 8796)
@@ -225,9 +225,11 @@ def test_a_blank_overlay_switches_one_off(cfg, sources, tmp_path):
 
 
 def test_effective_hides_the_machine_local_keys(cfg, sources):
-    cfg["weather"] = {"latitude": 38.36, "longitude": -75.59, "place": "home"}
-    cfg["bitaxe"] = {"host": "10.0.0.191"}
-    cfg["vps"] = {"ssh_host": "guild-vps"}
+    # Stand-ins, deliberately not the real ones: this repo is public and the test exists
+    # precisely because these keys must never leave the machine.
+    cfg["weather"] = {"latitude": 12.34, "longitude": -56.78, "place": "Placeville"}
+    cfg["bitaxe"] = {"host": "192.0.2.7"}
+    cfg["vps"] = {"ssh_host": "example-vps"}
     out = json.dumps(effective(cfg))
-    assert "38.36" not in out and "10.0.0.191" not in out and "guild-vps" not in out
+    assert "12.34" not in out and "192.0.2.7" not in out and "example-vps" not in out
     assert "brightness" in out and "scenes" in out
