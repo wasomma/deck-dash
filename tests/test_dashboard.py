@@ -3,6 +3,7 @@
 import copy
 import io
 import json
+import os
 import pathlib
 import socket
 import sys
@@ -21,7 +22,10 @@ from test_deckdash import cfg, sources  # noqa: E402,F401 - the shared fixtures
 
 from deckdash import config as dd_config  # noqa: E402
 from deckdash import dashboard  # noqa: E402
+from deckdash import main as main_mod  # noqa: E402
 from deckdash.app import build_slots  # noqa: E402
+from deckdash.control import send  # noqa: E402
+from deckdash.device import SimDeck  # noqa: E402
 from deckdash.dashboard import Dashboard, effective, validate_settings  # noqa: E402
 from deckdash.tiles import TILES  # noqa: E402
 
@@ -343,3 +347,71 @@ def test_write_local_leaves_no_temp_copy_behind(tmp_path, monkeypatch):
     assert not tmp.exists(), "a copy of the personal config was left in the tree"
     monkeypatch.setattr(dd_config.os, "replace", real)
     assert dd_config.load(ROOT / "config.toml", local)["weather"]["place"] == "Placeville"
+def test_the_faces_are_up_before_the_deck(cfg, tmp_path, monkeypatch):
+    """main() used to open the deck first, and open_with_retry waits for ever, so a missing
+    hidapi.dll or a deck another process already held gave no tray, no dashboard, no pipe and no
+    crash - total silence. The three faces start first now, and every one of them answers while the
+    open is still blocked. Against the old order the pipe below is simply not running yet."""
+    order: list = []
+    reached, release = threading.Event(), threading.Event()
+
+    class _LateDeck(SimDeck):
+        """A deck that does not arrive until the test says so, the way an unplugged one behaves."""
+
+        def open(self):
+            order.append("deck")
+            reached.set()
+            assert release.wait(10), "the test never released the open"
+            super().open()
+
+    class _RecordingTray:  # pystray for real would put an icon in Wes's tray during the test run
+        def __init__(self, app, root, url):
+            self.url = url
+
+        def start(self):
+            order.append("tray")
+
+        def stop(self):
+            order.append("tray stopped")
+
+    conf = copy.deepcopy(cfg)
+    pipe = f"deckdash-test-faces-{os.getpid()}"  # its own pipe and an OS-picked port: the live app keeps its own
+    conf["ui"] = {"tray": True, "pipe": pipe, "dashboard_port": 0}
+    conf_path = tmp_path / "config.toml"
+    dd_config.write_local(conf, conf_path)  # the whole dict written back out as TOML
+
+    boards: list = []
+    real_dashboard = main_mod.Dashboard
+
+    def _dashboard(app, port):
+        boards.append(real_dashboard(app, port))
+        return boards[-1]
+
+    monkeypatch.setattr(dd_config, "LOCAL_CONFIG", tmp_path / "no-such-local.toml")
+    monkeypatch.setattr(main_mod, "setup_logging", lambda verbose: None)  # no handler on the repo's log
+    monkeypatch.setattr(main_mod, "normal_priority", lambda: "priority test")  # leave pytest's own process alone
+    monkeypatch.setattr(main_mod, "job_summary", lambda: "none")
+    monkeypatch.setattr(main_mod, "single_instance", lambda *a, **k: True)  # the live task holds the real mutex
+    monkeypatch.setattr(main_mod, "RealDeck", lambda **kw: _LateDeck(gap=24, out_dir=tmp_path, interval=1e9))
+    monkeypatch.setattr(main_mod, "Tray", _RecordingTray)
+    monkeypatch.setattr(main_mod, "Dashboard", _dashboard)
+    monkeypatch.setattr(main_mod.App, "run", lambda self, max_seconds=None: order.append("run"))  # no source ever starts
+
+    t = threading.Thread(target=lambda: order.append(f"exit {main_mod.main(['--config', str(conf_path)])}"))
+    t.start()
+    try:
+        assert reached.wait(10), "main never got as far as opening the deck"
+        r = send("status", [], pipe=pipe, timeout=5)
+        assert r["ok"] and r["mode"] == "waiting" and r["deck"]["open"] is False
+        assert "not open yet" in send("pause", [], pipe=pipe, timeout=5)["error"]
+        board = boards[0]
+        s = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{board.port}/api/status", timeout=5).read())
+        assert s["ok"] and s["mode"] == "waiting" and s["tray_state"] == "off" and s["deck"]["open"] is False
+        page = urllib.request.urlopen(f"http://127.0.0.1:{board.port}/", timeout=5)
+        assert page.status == 200 and b"deck-dash" in page.read()
+        assert order == ["tray", "deck"]  # the tray first, and nothing past the open
+    finally:
+        release.set()
+        t.join(15)
+    assert not t.is_alive()
+    assert order == ["tray", "deck", "run", "tray stopped", "exit 0"]

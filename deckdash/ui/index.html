@@ -238,7 +238,8 @@ function tickStatus() {
     } else {
       t.appendChild(row("ambient", "no full minute measured yet", "muted"));
     }
-    t.appendChild(row("deck", s.deck.type + (s.deck.serial ? " · " + s.deck.serial : "")));
+    t.appendChild(row("deck", s.deck.open === false ? "waiting for the deck"
+      : s.deck.type + (s.deck.serial ? " · " + s.deck.serial : ""), s.deck.open === false ? "warn" : ""));
 
     var st = get("sources").tBodies[0];
     st.innerHTML = "";

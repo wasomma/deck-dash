@@ -151,6 +151,8 @@ class App:
 
     @property
     def mode(self) -> str:
+        if not self.deck.opened:  # main() brings the faces up before it waits for the deck
+            return "waiting"
         if self.locked:
             return "locked"
         if self.paused:
@@ -168,8 +170,11 @@ class App:
         return self._stop
 
     def tray_state(self) -> str:
-        """on / off / badge: what the tray icon shows."""
-        if self.paused or self.locked:
+        """on / off / badge: what the tray icon shows; grey until the deck opens, as the deck is dark.
+
+        ``opened`` is cleared only by ``close()``, never by a transport error, so this reads grey
+        before the first open and not during the in-place reconnect after a suspend."""
+        if self.paused or self.locked or not self.deck.opened:
             return "off"
         return "badge" if self.badges else "on"
 
@@ -374,7 +379,17 @@ class App:
 
     # --- commands (ctl, tray, dashboard) -----------------------------------------------
     def submit(self, cmd: str, args: list[str], timeout: float = 3.0) -> dict:
-        """Run a command on the loop thread from another thread and wait for the reply."""
+        """Run a command on the loop thread from another thread and wait for the reply.
+
+        The pipe, the dashboard and the tray are up before the deck is (main starts them first so a
+        deck that never arrives is visible rather than silent), and until the loop turns nothing
+        drains the queue. ``status`` is a read of attributes nothing is mutating yet, so it is
+        answered here instead of after the timeout - it is how a client finds out what is wrong;
+        anything that would drive the board says why it cannot."""
+        if not self.deck.opened:
+            if cmd == "status":
+                return {"ok": True, **self.status(time.time())}
+            return {"ok": False, "error": f"the deck is not open yet, so '{cmd}' has nothing to drive"}
         req = Request(cmd, list(args))
         self.commands.put(req)
         if not req.done.wait(timeout):
@@ -506,7 +521,8 @@ class App:
             last = float(getattr(src, "last_ok", 0.0) or 0.0)
             sources[name] = {"age_s": round(now - last, 1) if last else None, "error": getattr(src, "error", None),
                              "failures": int(getattr(src, "failures", 0) or 0)}
-        deck_info = getattr(self.deck, "info", None) or {}
+        deck_info = dict(getattr(self.deck, "info", None) or {}) or {"type": type(self.deck).__name__}
+        deck_info["open"] = bool(self.deck.opened)  # false while main is still waiting for it
         return {
             "version": __version__, "pid": self.pid, "mode": self.mode, "scene": self.scene.name if self.scene else None,
             "paused": self.paused, "locked": self.locked, "brightness": self._current_brightness,
@@ -514,7 +530,7 @@ class App:
             "idle_s": round(now - self.last_press, 1), "ticks": self.ticks, "slow_ticks": self.slow_total,
             "ambient": self.last_ambient, "badges": [a.tile for a in self.badges.values()],
             "toast": self.toast.title if self.toast else None, "tiles": [t.name for t in self.tiles],
-            "scenes": list(self.scene_names), "deck": deck_info or {"type": type(self.deck).__name__}, "sources": sources,
+            "scenes": list(self.scene_names), "deck": deck_info, "sources": sources,
         }
 
     # --- loop ------------------------------------------------------------------------

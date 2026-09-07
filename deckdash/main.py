@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from . import __version__, config, dashboard
-from .app import App
+from .app import App, build_slots
 from .control import DEFAULT_PIPE, SIM_PIPE, ControlServer, open_window, pipe_address
 from .dashboard import Dashboard
 from .device import RealDeck, SimDeck
@@ -176,8 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         deck = SimDeck(gap=int(dk.get("gap_px", 24)), out_dir=ROOT / "sim")
     else:
         deck = RealDeck(hidapi_dir=args.hidapi or dk.get("hidapi_dir"), brightness=int(dk.get("brightness", 80)))
-        open_with_retry(deck)
-    app = App(cfg, deck, config_loader=load_cfg)
+    app = App(cfg, deck, config_loader=load_cfg)  # key_count is the class default until the deck opens
     if args.ambient is not None:
         app.forced_scene = args.ambient
         app.start_ambient(time.time(), args.ambient)
@@ -194,6 +193,14 @@ def main(argv: list[str] | None = None) -> int:
     if tray is not None:
         tray.start()
     try:
+        # The three faces come up first on purpose. open_with_retry waits for ever, so opening the
+        # deck before them meant a missing hidapi.dll, or a deck another process already held, gave
+        # no tray, no dashboard and no crash - total silence. Now the tray is grey, the page says
+        # "waiting for the deck", `deckdash ctl status` answers, and the log names each attempt.
+        if not args.sim:
+            open_with_retry(deck)
+            if deck.key_count != len(app.slots):  # a deck that is not the 15-key default
+                app.slots = build_slots(cfg.get("layout", {}).get("keys", []), deck.key_count, cfg, app.sources)
         app.run(max_seconds=args.seconds or None)
     finally:
         if tray is not None:

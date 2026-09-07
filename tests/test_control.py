@@ -72,7 +72,7 @@ def test_commands_drive_the_app(cfg, sources, tmp_path):
     app, deck = make_app(cfg, sources, tmp_path)
     r = app.command("status", [])
     assert r["ok"] and r["mode"] == "board" and r["tiles"][0] == "clock" and r["sources"]["weather"]["error"] is None
-    assert r["deck"] == {"type": "SimDeck"} and r["slow_ticks"] == 0 and r["brightness_override"] is None
+    assert r["deck"] == {"type": "SimDeck", "open": True} and r["slow_ticks"] == 0 and r["brightness_override"] is None
     r = app.command("scene", ["tokyo"])
     assert r["ok"] and app.mode == "ambient" and app.scene.name == "tokyo"
     r = app.command("next", [])
@@ -181,6 +181,25 @@ def test_validate_and_ctl(capsys):
     assert deckdash_main(["ctl", "--pipe", "deckdash-test-none", "wake"]) == 1  # dispatched before the app's own parser
     assert ctl.main(["--pipe", "deckdash-test-none", "--json", "status"]) == 1
     assert '"ok": false' in capsys.readouterr().out
+
+
+def test_the_faces_before_the_deck_is_open(cfg, sources, tmp_path):
+    """main() starts the tray, the pipe and the dashboard before it waits for the deck, so each of
+    them has to say so rather than look healthy. Until the loop turns nothing drains the command
+    queue, so ``submit`` answers ``status`` itself - a read of attributes nothing is mutating yet,
+    and the one command a client needs while it is trying to find out what is wrong."""
+    cfg["deck"]["off_on_lock"] = False
+    deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)  # constructed, deliberately not opened
+    app = App(cfg, deck, sources=sources)
+    assert not deck.opened and app.mode == "waiting" and app.tray_state() == "off"
+    r = app.submit("status", [])
+    assert r["ok"] and r["mode"] == "waiting" and r["deck"] == {"type": "SimDeck", "open": False}
+    r = app.submit("next", [])
+    assert not r["ok"] and "not open yet" in r["error"] and app.scene is None
+    assert app.commands.empty()  # neither call left a request behind for a loop that is not running
+    app.start()
+    assert deck.opened and app.mode == "board" and app.tray_state() == "on"
+    assert app.command("status", [])["deck"] == {"type": "SimDeck", "open": True}
 
 
 def test_tray_icon_images():
