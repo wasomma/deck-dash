@@ -89,7 +89,7 @@ Out of scope by decision: audio-reactive bars.
 ## Phase 5 — more scenes
 Requested by Wes on the evening of 2026-09-06 after seeing the five scenes on the hardware (spec: side view, R34 Skyline, rain on about half the showings, real glyph signs, sixth in the rotation).
 - [x] `ambient/tokyo.py` (`tokyo`): side-scrolling Tokyo night drive. Wrapping parallax strips (sky and stars; far skyline with Tokyo Tower, Skytree and a rail viaduct; neon facades with vertical and horizontal signs, shop fronts, rooftop screens; the wet street with lamps, crossings and pedestrians). An R34 Skyline GT-R in Bayside Blue holds the centre with spinning rims, tail-light glow and a headlight beam; a Yamanote train crosses the viaduct every 20-40 s; taxis overtake or get passed in the far lane; about half the showings are rainy (streaks, stronger sign reflections). Sign glyphs are MS Gothic words (Latin fallback without the font) and decorative like the matrix rain, so they cross bezels. About 1.2 ms per frame at 452x262. Appended as the sixth scene; 94 tests.
-- [~] Tokyo has run on the deck for hours across 2026-09-06 and 07 and is the scene used for every acceptance measurement, and Wes has seen it in the dashboard preview; he has not given an explicit verdict on how it looks. Ask when convenient.
+- [x] Wes on the hardware, 2026-09-07: "tokyo looks great".
 - [x] Frame pacing (Wes asked for more fps and chose 14): the loop now sleeps until the next scene or toast frame is due instead of snapping to the 10 Hz tick, which had quantized the 8 fps scenes to 5 fps on the hardware. `ambient.fps = 14`; tokyo, aquarium, matrix, plasma and weather run at 14 (life stays at 4 generations per second); the matrix rain moves per second now so its look is unchanged. Once a minute in ambient mode the log reports the achieved fps and the flush cost. 95 tests.
 - [x] Measured on the deck 2026-09-06 20:11 (tokyo, one minute): 13.9 fps at target 14, flush avg 62 ms, max 69 ms, 14.5 keys per frame. The 71 ms frame period holds; 16 would not (bus limit).
 
@@ -161,5 +161,26 @@ Gate passed 2026-09-06 22:45 ("execute in that order"): pystray and the setuptoo
 ## Merge and push
 - [x] Evening of 2026-09-06: `main` fast-forwarded to `406ba2e`, a merge of `claude/sweet-mclean-8f59b9` (Phases 2-4) that also folds in the Phase 1 hardware-review notes `main` had picked up meanwhile (a plain fast-forward was impossible because of that one commit). Local only: `main` is six commits ahead of `origin/main`. 92 tests pass on the merged tree. The main checkout has the code, the venv, and `config.local.toml`, so the scheduled task can run from it.
 - [x] Pushed 2026-09-06 20:25 on "push it": `origin/main` now at `0ca19df` (96787c3..0ca19df, twelve commits). Both worktrees unregistered with `git worktree remove --force` + `git worktree prune`; `git worktree list` shows only `main` and the current session worktree. The two empty folders `sweet-mclean-8f59b9` and `stoic-roentgen-a34d62` stay on disk ("being used by another process") until the desktop-app tabs whose cwd they were are closed; then `rmdir` them. The merged branches `claude/sweet-mclean-8f59b9` and `claude/stoic-roentgen-a34d62` still exist locally (`git branch -d` when convenient).
+
+
+## Sleep/wake: the reconnect path, tested at last
+Status: **passed 2026-09-07 12:57** on the real deck, the last untested path in the project.
+Wes slept the PC from an ambient scene, left it about seven minutes, and woke it. The point of the
+test is that the process must SURVIVE: a shutdown would only re-run `open_with_retry`, which the
+logon task exercises daily, whereas a suspend makes the running app lose the device and recover it
+in place. Pid 18356 before and after, so the in-process path is what ran.
+- 12:50:49 `deck write failed, will reconnect: Failed to write out report (-1)` - the transport error
+  caught in `RealDeck._send`; one slow tick (flush 1042 ms) for the failing write.
+- 12:50:53-12:57:56 asleep. NVML and the Bitaxe went unreachable too.
+- 12:57:59 `deck open:` with the same serial AL19H1A00539 - `_maybe_reconnect` caught it about three
+  seconds after resume, inside its 5 s retry. One slow tick (flush 2494 ms) for the reconnect plus the
+  full repaint that `invalidate()` forces. 12:58:01 the scene resumed by itself.
+- Everything downstream came back too: `MINER OFFLINE` on the way down and `MINER BACK 1.06T` thirteen
+  seconds after resume; the wake's lock screen darkened the deck at 12:58:31 and restored it at
+  12:58:41; key presses registered and zoomed; and every source reads ok, including NVML, which had
+  failed five times during the suspend and was the one most likely to stay wedged.
+- Cost: exactly two slow ticks, one at each boundary. That is the floor for a suspend and a resume.
+- Aside, for the BSOD tracker: the machine slept and woke cleanly, which is a data point in the
+  observation window after the BIOS flash and the XMP step-down of 2026-09-05.
 
 Status at hand-off, 2026-09-07 11:20: **Phase 7 is done, both halves.** 7a (the `deckdash` command, the named-pipe control channel, `deckdash ctl` and the tray) was verified on the deck, reviewed adversarially, fixed and merged, and Wes re-registered the task on `deckdashw.exe` at 10:46. 7b (the localhost dashboard and its Edge app-mode window) is verified on the deck too: tokyo for two minutes with the window open and the preview streaming held 13.9 fps at target 14, flush avg 61-62 ms max 66 and 69 ms, 0 slow ticks, and Wes confirmed the window and the live preview. 121 tests pass. The deck runs from the main checkout under the scheduled task, whose action is `.venv\Scripts\deckdashw.exe`. `origin/main` is behind local `main`; push on "push it". Open, and nothing is blocked on it: a sleep/wake test of the reconnect path whenever Wes reports one - `DeckBase.invalidate` now also re-sizes the new `_shown` mirror if the reconnected deck reports a different key count, which is the only part of that path 7b touched. Worth knowing for whatever comes next: `config.write_local` cannot delete a key from a table (it merges), which is why a blank overlay value means "no overlay"; and it now writes through a temp file and re-parses before replacing, because `config.local.toml` is read at every start and one unparsable write would leave the deck dark at the next logon.
