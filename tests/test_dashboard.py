@@ -4,6 +4,7 @@ import copy
 import io
 import json
 import pathlib
+import socket
 import sys
 import threading
 import time
@@ -25,11 +26,30 @@ from deckdash.dashboard import Dashboard, effective, validate_settings  # noqa: 
 from deckdash.tiles import TILES  # noqa: E402
 
 
-def serve(app, port):
+def serve(app, port=0):
+    """Port 0 = let the OS pick. Hard-coded ports collided when two runs overlapped, and because
+    `ready` is set on the refused path too, the loser silently drove the winner's App."""
     board = Dashboard(app, port)
     board.start()
     assert board.ready.wait(5), "the dashboard thread never became ready"
+    assert board.error is None, f"the dashboard did not bind: {board.error}"
     return board
+
+
+def raw(board, request: bytes) -> bytes:
+    """One request written byte for byte, so a test can shape headers a browser would send."""
+    chunks = []
+    with socket.create_connection(("127.0.0.1", board.port), timeout=5) as s:
+        s.sendall(request)
+        try:
+            while True:  # every request here sends Connection: close, so read to EOF
+                b = s.recv(4096)
+                if not b:
+                    break
+                chunks.append(b)
+        except (TimeoutError, OSError):
+            pass
+    return b"".join(chunks)
 
 
 def drive(app, work, timeout=5):
@@ -68,7 +88,7 @@ def call(app, board, path, body=None):
 
 def test_status_frame_and_page(cfg, sources, tmp_path):
     app, deck = make_app(cfg, sources, tmp_path)
-    board = serve(app, 8791)
+    board = serve(app)
     try:
         page = call(app, board, "/")
         assert b"<title>deck-dash</title>" in page and b"/api/frame.png" in page
@@ -94,7 +114,7 @@ def test_status_frame_and_page(cfg, sources, tmp_path):
 
 def test_frame_is_cached_and_survives_an_unwritten_key(cfg, sources, tmp_path):
     app, deck = make_app(cfg, sources, tmp_path)
-    board = serve(app, 8792)
+    board = serve(app)
     try:
         first = board.frame_png()
         assert board.frame_png() is first  # inside the 200 ms window: one compose, not one per client
@@ -108,7 +128,7 @@ def test_frame_is_cached_and_survives_an_unwritten_key(cfg, sources, tmp_path):
 
 def test_cmd_endpoint_drives_the_app(cfg, sources, tmp_path):
     app, deck = make_app(cfg, sources, tmp_path)
-    board = serve(app, 8793)
+    board = serve(app)
     try:
         r = call(app, board, "/api/cmd", {"cmd": "scene", "args": ["tokyo"]})
         assert r["ok"] and app.scene.name == "tokyo"
@@ -126,7 +146,7 @@ def test_cmd_endpoint_drives_the_app(cfg, sources, tmp_path):
 def test_open_is_intercepted_before_validate(cfg, sources, tmp_path, monkeypatch):
     """restart and open are client-side helpers; control.validate would reject them as unknown."""
     app, deck = make_app(cfg, sources, tmp_path)
-    board = serve(app, 8794)
+    board = serve(app)
     opened = []
     monkeypatch.setattr(dashboard, "open_window", lambda url: opened.append(url) or "edge")
     try:
@@ -140,8 +160,8 @@ def test_open_is_intercepted_before_validate(cfg, sources, tmp_path, monkeypatch
 def test_a_busy_port_is_a_warning_not_a_failure(cfg, sources, tmp_path):
     """A second copy or a stale window must not stop the deck from lighting up."""
     app, deck = make_app(cfg, sources, tmp_path)
-    first = serve(app, 8795)
-    second = Dashboard(app, 8795)
+    first = serve(app)  # then collide with whatever the OS actually gave us
+    second = Dashboard(app, first.port)
     second.start()
     try:
         assert second.ready.wait(5) and second.error is not None
@@ -160,7 +180,7 @@ def test_save_writes_reloads_and_reports_a_restart(cfg, sources, tmp_path, monke
     dd_config.write_local({"weather": {"latitude": 12.34, "place": "somewhere"}}, local)
     monkeypatch.setattr(dd_config, "LOCAL_CONFIG", local)
     app.config_loader = lambda: dd_config._merge(copy.deepcopy(cfg), dd_config.load(ROOT / "config.toml", local))
-    board = serve(app, 8796)
+    board = serve(app)
     try:
         r = drive(app, lambda: board.save_settings({"deck": {"brightness": 44}, "ambient": {"scene_minutes": 3}}))
         assert r["ok"], r
@@ -182,7 +202,7 @@ def test_a_rejected_save_never_reaches_the_file(cfg, sources, tmp_path, monkeypa
     app, deck = make_app(cfg, sources, tmp_path)
     local = tmp_path / "config.local.toml"
     monkeypatch.setattr(dd_config, "LOCAL_CONFIG", local)
-    board = serve(app, 8797)
+    board = serve(app)
     try:
         for bad, why in [
             ({"deck": {"brightness": 900}}, "0-100"),
@@ -233,3 +253,93 @@ def test_effective_hides_the_machine_local_keys(cfg, sources):
     out = json.dumps(effective(cfg))
     assert "12.34" not in out and "192.0.2.7" not in out and "example-vps" not in out
     assert "brightness" in out and "scenes" in out
+
+
+# --- who is allowed to ask ----------------------------------------------------------------------
+
+def test_a_cross_site_form_post_cannot_drive_the_deck(cfg, sources, tmp_path):
+    """text/plain, form and multipart bodies are CORS-safelisted, so a plain HTML form on any site
+    reaches loopback with no preflight - and the side effect lands even though the reply is
+    unreadable. The form trick puts the '=' inside an ignored key, so the body is valid JSON."""
+    app, deck = make_app(cfg, sources, tmp_path)
+    board = serve(app)
+    try:
+        for ctype in (b"text/plain;charset=UTF-8", b"application/x-www-form-urlencoded",
+                      b"multipart/form-data; boundary=----x"):
+            body = b'{"cmd":"quit","args":[],"x":"="}\r\n'
+            req = (b"POST /api/cmd HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n" % board.port
+                   + b"Origin: https://evil.example\r\nContent-Type: " + ctype + b"\r\n"
+                   + b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(body) + body)
+            reply = drive(app, lambda r=req: raw(board, r))
+            assert b"403" in reply.split(b"\r\n", 1)[0], ctype
+            assert b"application/json" in reply
+        assert not app.stopping and not app.paused  # nothing got through
+
+        # A same-origin JSON post from the page itself still works.
+        assert call(app, board, "/api/cmd", {"cmd": "pause", "args": []})["ok"] and app.paused
+    finally:
+        board.stop()
+        app.stop()
+
+
+def test_a_foreign_origin_is_refused_even_with_json(cfg, sources, tmp_path):
+    app, deck = make_app(cfg, sources, tmp_path)
+    board = serve(app)
+    try:
+        body = b'{"cmd":"quit","args":[]}'
+        req = (b"POST /api/cmd HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n" % board.port
+               + b"Origin: https://evil.example\r\nContent-Type: application/json\r\n"
+               + b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(body) + body)
+        reply = drive(app, lambda: raw(board, req))
+        assert b"403" in reply.split(b"\r\n", 1)[0] and b"cross-origin" in reply
+        assert not app.stopping
+
+        own = f"http://127.0.0.1:{board.port}".encode()
+        req = req.replace(b"Origin: https://evil.example", b"Origin: " + own)
+        reply = drive(app, lambda: raw(board, req))
+        assert b"200" in reply.split(b"\r\n", 1)[0] and app.stopping  # our own page may
+    finally:
+        board.stop()
+        app.stop()
+
+
+def test_a_rebound_host_is_refused_on_reads_too(cfg, sources, tmp_path):
+    """Loopback binding does not stop a page whose DNS was re-pointed at 127.0.0.1: the browser
+    treats it as same-origin, so it could READ the deck image and the status. Only Host tells them
+    apart."""
+    app, deck = make_app(cfg, sources, tmp_path)
+    board = serve(app)
+    try:
+        for host in (b"deck.attacker.example", b"deck.attacker.example:1234"):
+            req = (b"GET /api/status HTTP/1.1\r\nHost: " + host + b"\r\nConnection: close\r\n\r\n")
+            reply = drive(app, lambda r=req: raw(board, r))
+            assert b"403" in reply.split(b"\r\n", 1)[0] and b"bad host" in reply, host
+        for host in (b"127.0.0.1:%d" % board.port, b"localhost:%d" % board.port, b"[::1]:%d" % board.port):
+            req = (b"GET /api/status HTTP/1.1\r\nHost: " + host + b"\r\nConnection: close\r\n\r\n")
+            reply = drive(app, lambda r=req: raw(board, r))
+            assert b"200" in reply.split(b"\r\n", 1)[0], host
+    finally:
+        board.stop()
+        app.stop()
+
+
+def test_write_local_leaves_no_temp_copy_behind(tmp_path, monkeypatch):
+    """The temp file holds every personal value in config.local.toml. It is gitignored, and it has
+    to be gone on every path out - os.replace raises PermissionError on Windows whenever anything
+    holds the destination open, which the tray's Edit config does."""
+    local = tmp_path / "config.local.toml"
+    dd_config.write_local({"weather": {"place": "Placeville"}}, local)
+    tmp = local.with_suffix(".tmp.toml")
+    assert not tmp.exists()
+
+    real = dd_config.os.replace
+
+    def boom(src, dst):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(dd_config.os, "replace", boom)
+    with pytest.raises(PermissionError):
+        dd_config.write_local({"deck": {"brightness": 42}}, local)
+    assert not tmp.exists(), "a copy of the personal config was left in the tree"
+    monkeypatch.setattr(dd_config.os, "replace", real)
+    assert dd_config.load(ROOT / "config.toml", local)["weather"]["place"] == "Placeville"

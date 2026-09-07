@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 config.local.toml
+config.local.*.toml
 sim/
 logs/
 state/

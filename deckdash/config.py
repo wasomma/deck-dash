@@ -81,12 +81,17 @@ def write_local(update: dict, local: Path | str | None = None) -> None:
     # Written through a temp file and read back before it replaces the real one. This file is read
     # at every start, so a half-written or unparsable copy would leave the deck dark at the next
     # logon; the dashboard's settings form is the first thing that puts typed text in here.
+    # It holds a full copy of the personal values, so it is gitignored and removed on every path
+    # out of here - os.replace raises PermissionError on Windows whenever anything holds the
+    # destination open, which the tray's Edit config does.
     tmp = local.with_suffix(".tmp.toml")
-    tmp.write_text("\n".join(lines), encoding="utf-8")
     try:
-        with open(tmp, "rb") as f:
-            tomllib.load(f)
-    except tomllib.TOMLDecodeError as exc:
-        tmp.unlink(missing_ok=True)
-        raise ValueError(f"refusing to write unparsable {local.name}: {exc}") from exc
-    os.replace(tmp, local)
+        tmp.write_text("\n".join(lines), encoding="utf-8")
+        try:
+            with open(tmp, "rb") as f:
+                tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"refusing to write unparsable {local.name}: {exc}") from exc
+        os.replace(tmp, local)
+    finally:
+        tmp.unlink(missing_ok=True)  # a no-op after a successful replace

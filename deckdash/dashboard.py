@@ -31,6 +31,7 @@ FRAME_CACHE_S = 0.2  # the page asks at 5 fps; one compose+encode per refresh, n
 SUBMIT_TIMEOUT_S = 3.0
 MAX_BODY = 256 * 1024
 UI_DIR = Path(__file__).resolve().parent / "ui"
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 # Config paths the settings form owns. Everything else in config.local.toml - the weather
 # coordinates, the Bitaxe address, the VPS block, the calibrated gap - is never read out to the
@@ -224,13 +225,18 @@ class Dashboard(threading.Thread):
         super().__init__(name="dashboard", daemon=True)
         self.app = app
         self.port = port
-        self.url = f"http://127.0.0.1:{port}/"
+        self._set_port(port)
         self.ready = threading.Event()
         self.error: str | None = None
         self._server: ThreadingHTTPServer | None = None
         self._frame: tuple[float, bytes] | None = None
         self._frame_lock = threading.Lock()
         self._write_lock = threading.Lock()  # config.write_local is read-modify-write
+
+    def _set_port(self, port: int) -> None:
+        self.port = port
+        self.url = f"http://127.0.0.1:{port}/"
+        self.origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
 
     def run(self) -> None:
         handler = _handler_for(self)
@@ -241,6 +247,7 @@ class Dashboard(threading.Thread):
             log.warning("dashboard port %d unavailable: %s", self.port, exc)
             self.ready.set()
             return
+        self._set_port(self._server.server_address[1])  # port 0 asks the OS to pick one (tests)
         log.info("dashboard %s", self.url)
         self.ready.set()
         try:
@@ -340,8 +347,39 @@ def _handler_for(dash: Dashboard):
                 raise ValueError("bad request body")
             return json.loads(self.rfile.read(length).decode("utf-8"))
 
+        # --- who is allowed to ask -----------------------------------------------------
+        # Binding to loopback keeps the LAN out; it does not keep a web page out, because the
+        # browser making the request IS a local process. Two guards close that, and both cost the
+        # real page nothing - it is always loaded from this exact origin.
+
+        def _host_ok(self) -> bool:
+            """Reject a request addressed to any name but loopback: a page on an attacker domain
+            whose DNS is re-pointed at 127.0.0.1 is same-origin with us, so it could read every
+            reply. Comparing Host is the only thing that tells the two apart."""
+            raw = (self.headers.get("Host") or "").strip().lower()
+            name = raw[1:raw.index("]")] if raw.startswith("[") and "]" in raw else raw.split(":", 1)[0]
+            return name in LOCAL_HOSTS
+
+        def _write_allowed(self) -> str | None:
+            """None when a state-changing request may proceed, else why not.
+
+            ``text/plain``, form and multipart bodies are CORS-safelisted, so a plain HTML form on
+            any site can POST here with no preflight and no Origin check by the browser - and the
+            side effect lands even though the reply is unreadable. Requiring JSON means a
+            cross-origin caller must preflight, which we never answer."""
+            ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            if ctype != "application/json":
+                return "expected Content-Type: application/json"
+            origin = self.headers.get("Origin")
+            if origin is not None and origin.strip().lower() not in dash.origins:
+                return "cross-origin request refused"
+            return None
+
         def do_GET(self) -> None:  # noqa: N802 - the stdlib's naming
             path = self.path.split("?", 1)[0]
+            if not self._host_ok():
+                self._json({"ok": False, "error": "bad host"}, 403)
+                return
             try:
                 if path in ("/", "/index.html"):
                     page = (UI_DIR / "index.html").read_bytes()
@@ -360,6 +398,15 @@ def _handler_for(dash: Dashboard):
 
         def do_POST(self) -> None:  # noqa: N802 - the stdlib's naming
             path = self.path.split("?", 1)[0]
+            if not self._host_ok():
+                self._json({"ok": False, "error": "bad host"}, 403)
+                return
+            refused = self._write_allowed()
+            if refused:
+                log.warning("dashboard refused a POST to %s: %s (origin %r)", path, refused,
+                            self.headers.get("Origin"))
+                self._json({"ok": False, "error": refused}, 403)
+                return
             try:
                 body = self._body()
                 if path == "/api/cmd":
