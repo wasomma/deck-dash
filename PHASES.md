@@ -186,7 +186,7 @@ in place. Pid 18356 before and after, so the in-process path is what ran.
 ## After Phase 7: three fixes for a second deck
 Offered at the end of Phase 7, approved 2026-09-07 13:20 ("all three, one commit each"). Wes's wife
 has the same 15-key deck and wants the same setup from the public repo, which is what these are for.
-Three commits plus this one, pushed to `origin/main` 2026-09-07 14:12 (7954437..b2f6f4b, a fast-forward).
+Three commits plus a PHASES pair, pushed to `origin/main` 2026-09-07 14:12 (7954437..b54fed8, a fast-forward). The quit fix below came after that push and is not on `origin/main` yet.
 
 - [x] `tools\install_task.ps1` read `deck.hidapi_dir` from `config.toml` only, so the repo's own
   "machine-local goes in config.local.toml" convention broke task registration on any machine whose
@@ -226,17 +226,40 @@ Three commits plus this one, pushed to `origin/main` 2026-09-07 14:12 (7954437..
   LAN, the `gh` CLI logged in, an SSH alias - each switched off by the same empty value
   (`host = ""`, `repos = []`, `services = []`), which stops the poller and not just the tile. Also
   corrected: the tray's default menu item opens on a left click, not a double-click.
-- [ ] **Not seen on the hardware.** The waiting state has only been exercised by the tests and by a
-  simulator run from the worktree (its own pipe `deckdash-sim` and port 8771, beside the live task:
-  pipe, dashboard and `/api/frame.png` all answered, `deck.open` true). Checking it for real means
-  stopping the task, pointing `hidapi_dir` at an empty folder and launching from the worktree, so
-  that the tray comes up grey and the page says "waiting for the deck" with the deck untouched -
-  then restoring the config and `install_task.ps1 -Start`. It needs Wes at the machine, because the
-  deck goes dark for the duration.
+- [x] **Quit had to be let out of the wait, found while setting up that hardware check.** The tray's
+  Quit is wired through `App.submit` like every other menu item, so the refusal above covered it:
+  the icon was up, the wait was endless, and the only way to be rid of it was Task Manager or
+  `install_task.ps1 -Stop`. That is a worse failure than the silence it replaced. `submit` now
+  answers `quit` as well as `status` while the deck is not open, `open_with_retry` takes a stop
+  predicate and slices its 10 s sleep into 0.2 s so the flag is seen promptly, and `main` returns 0
+  through the same `finally` that stops the three faces. 128 tests, the new one checked to fail
+  against the pre-fix code; its `main()` thread is a daemon so a future break in the quit path fails
+  the test instead of wedging pytest at exit.
+- [x] **Seen on the hardware, 2026-09-07 14:14-14:15**, the deck dark for 50 s. The task stopped,
+  then this branch launched from the worktree with `--hidapi` pointing at an empty folder (no
+  `config.local.toml` was touched: the flag overrides the config, and `--config` pointed at a copy
+  with the weather coordinates pinned so nothing was written). The log is the whole point:
+
+      14:14:42,945 control pipe \\.\pipe\deckdash
+      14:14:42,950 dashboard http://127.0.0.1:8770/
+      14:14:42,966 tray icon up
+      14:14:43,055 WARNING deck not available (attempt 1): Probe failed to find any functional
+                   HID backend ... Is the 'hidapi.dll' library installed?
+
+  Before the fix that warning was the only line, and there was nothing else to ask. All three faces
+  answered while the wait ran: `ctl status` gave `mode waiting`, `ticks 0`; `/api/status` gave
+  `mode waiting`, `tray_state off`, `deck {'type': 'RealDeck', 'open': False}`; the page served
+  20,386 bytes and `/api/frame.png` 1,421 (a dark board); `ctl scene tokyo` was refused with "the
+  deck is not open yet, so 'scene' has nothing to drive", exit 1. Then `ctl quit` answered `ok` and
+  the process was gone 116 ms later (`quit requested` 14:15:10,004, `quit while waiting for the
+  deck` 14:15:10,120), leaving no python process and no tray icon. `install_task.ps1 -Start` brought
+  the deck back at 14:15:22 on the same serial AL19H1A00539, mode board, 0 slow ticks. Not confirmed
+  visually: that the tray icon was actually grey rather than green - the API said `tray_state off`,
+  which is the value the icon is drawn from, but nobody looked at it.
 
 Worth knowing: `pytest` on this machine prints "Windows fatal exception: access violation" with a
 thread dump on roughly two runs in three, and the suite still reports all green. It predates these
 changes - it reproduces with the 125 pre-existing tests and the new ones deselected - so a future
 session should not read it as a regression from them.
 
-Status at hand-off, 2026-09-07 14:05: **Phase 7 is done and the three follow-up fixes are done.** Phase 7 (the `deckdash` command, the named-pipe control channel, the tray, and the localhost dashboard in its Edge app-mode window) was verified on the deck, reviewed adversarially twice, merged and pushed, and the sleep/wake reconnect path has since been verified too. On top of that, pushed to `origin/main` at b2f6f4b: `install_task.ps1` honours `hidapi_dir` from `config.local.toml`; `main()` starts the tray, the dashboard and the pipe before it waits for the deck, so a deck that never arrives is visible instead of silent; and the README gained a "A second machine" section. 127 tests pass. The deck still runs from the main checkout under the scheduled task on `.venv\Scripts\deckdashw.exe`, and that checkout is four commits behind: `git pull --ff-only` there and `tools\install_task.ps1 -Stop` then `-Start` makes the three fixes live. No re-install is needed - the editable install points at the checkout path, so a pull is enough - but the task has to restart to load the new code. Open: the hardware check of the waiting state (above), which needs Wes at the machine. Worth knowing for whatever comes next: `config.write_local` cannot delete a key from a table (it merges), which is why a blank overlay value means "no overlay"; it writes through a temp file and re-parses before replacing, because `config.local.toml` is read at every start and one unparsable write would leave the deck dark at the next logon; and `RealDeck.opened` means "has been opened", not "the handle is live" - a transport error leaves it true, which is what lets the new waiting state stay quiet through a suspend.
+Status at hand-off, 2026-09-07 14:20: **Phase 7 is done and the three follow-up fixes are done.** Phase 7 (the `deckdash` command, the named-pipe control channel, the tray, and the localhost dashboard in its Edge app-mode window) was verified on the deck, reviewed adversarially twice, merged and pushed, and the sleep/wake reconnect path has since been verified too. On top of that: `install_task.ps1` honours `hidapi_dir` from `config.local.toml`; `main()` starts the tray, the dashboard and the pipe before it waits for the deck, so a deck that never arrives is visible instead of silent, and `quit` reaches that wait; and the README gained a "A second machine" section. All four are verified, the waiting state on the hardware. 128 tests pass. `origin/main` is at b54fed8 and holds the first three; **the quit fix (31e7464) is committed on the branch and not pushed**. The deck runs from the main checkout under the scheduled task on `.venv\Scripts\deckdashw.exe`, still at 7954437 - none of this is live there yet. To make it live, in this order: push the quit fix, `git pull --ff-only` in the main checkout, then `tools\install_task.ps1 -Stop` and `-Start`. No re-install is needed, because the editable install points at the checkout path, but the task has to restart to load the new code. Pulling without the quit fix would put the endless wait on the live app without its way out, so the order matters. Open: the hardware check of the waiting state (above), which needs Wes at the machine. Worth knowing for whatever comes next: `config.write_local` cannot delete a key from a table (it merges), which is why a blank overlay value means "no overlay"; it writes through a temp file and re-parses before replacing, because `config.local.toml` is read at every start and one unparsable write would leave the deck dark at the next logon; and `RealDeck.opened` means "has been opened", not "the handle is live" - a transport error leaves it true, which is what lets the new waiting state stay quiet through a suspend.
