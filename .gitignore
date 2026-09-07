@@ -6,3 +6,5 @@ config.local.toml
 sim/
 logs/
 state/
+build/
+*.egg-info/

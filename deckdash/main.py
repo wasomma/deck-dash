@@ -10,7 +10,9 @@ from pathlib import Path
 
 from . import __version__, config
 from .app import App
+from .control import DEFAULT_PIPE, SIM_PIPE, ControlServer, pipe_address
 from .device import RealDeck, SimDeck
+from .tray import Tray
 
 ROOT = Path(__file__).resolve().parent.parent
 log = logging.getLogger(__name__)
@@ -135,6 +137,11 @@ def open_with_retry(deck: RealDeck, retry_s: float = 10.0) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "ctl":  # `deckdash ctl ...` talks to the running copy instead of starting one
+        from .ctl import main as ctl_main
+
+        return ctl_main(argv[1:])
     p = argparse.ArgumentParser(prog="deckdash", description="Stream Deck ambient info display")
     p.add_argument("--sim", action="store_true", help="no hardware: write sim/canvas.png instead")
     p.add_argument("--seconds", type=float, default=0.0, help="run for this long, then exit (0 = forever)")
@@ -150,21 +157,37 @@ def main(argv: list[str] | None = None) -> int:
     if not args.sim and not single_instance():
         log.error("another deck-dash is already running (scheduled task?); exiting")
         return 3
-    cfg = config.load(args.config)
-    dk = cfg.setdefault("deck", {})
-    if args.gap is not None:
-        dk["gap_px"] = args.gap
+    def load_cfg() -> dict:  # also the `reload` command's loader, so the overrides survive a reload
+        cfg = config.load(args.config)
+        dk = cfg.setdefault("deck", {})
+        if args.gap is not None:
+            dk["gap_px"] = args.gap
+        if args.ambient is not None:
+            dk["idle_minutes"] = 5 / 60
+        return cfg
+
+    cfg = load_cfg()
+    dk = cfg["deck"]
     if args.sim:
         deck = SimDeck(gap=int(dk.get("gap_px", 24)), out_dir=ROOT / "sim")
     else:
         deck = RealDeck(hidapi_dir=args.hidapi or dk.get("hidapi_dir"), brightness=int(dk.get("brightness", 80)))
         open_with_retry(deck)
-    if args.ambient is not None:
-        dk["idle_minutes"] = 5 / 60
-    app = App(cfg, deck)
+    app = App(cfg, deck, config_loader=load_cfg)
     if args.ambient is not None:
         app.forced_scene = args.ambient
         app.start_ambient(time.time(), args.ambient)
     log.info("deckdash %s starting (%s), %s; job: %s", __version__, "simulator" if args.sim else "hardware", normal_priority(), job_summary())
-    app.run(max_seconds=args.seconds or None)
+    ui = cfg.get("ui", {})
+    control = ControlServer(app, pipe_address(SIM_PIPE if args.sim else str(ui.get("pipe", DEFAULT_PIPE))))
+    control.start()
+    tray = Tray(app, ROOT) if bool(ui.get("tray", True)) and not args.sim else None
+    if tray is not None:
+        tray.start()
+    try:
+        app.run(max_seconds=args.seconds or None)
+    finally:
+        if tray is not None:
+            tray.stop()
+        control.stop()
     return 0

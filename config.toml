@@ -25,6 +25,10 @@ scenes = ["weather", "plasma", "life", "matrix", "aquarium", "tokyo"]   # rotati
 scene_minutes = 5      # each scene runs this long before the next one
 fps = 14               # ceiling for full-deck animation; a 15-key repaint is 60 ms on the gen-1 deck, so 16 is the bus limit
 
+[ui]
+tray = true            # system tray icon (pystray): wake, scene, pause, brightness, log, config, recalibrate, restart, quit
+pipe = "deckdash"      # control channel, the named pipe \\.\pipe\deckdash, for `deckdash ctl` (the simulator uses deckdash-sim)
+
 [clock]
 twelve_hour = true
 

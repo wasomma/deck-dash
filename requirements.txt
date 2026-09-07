@@ -5,4 +5,5 @@ psutil>=7.0
 nvidia-ml-py>=13.0
 feedparser>=6.0
 requests>=2.32
+pystray>=0.19
 pytest>=9.0

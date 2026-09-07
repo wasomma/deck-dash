@@ -4,15 +4,19 @@ idle, off when locked."""
 from __future__ import annotations
 
 import logging
+import os
 import queue
+import threading
 import time
 from collections import deque
+from typing import Callable
 
+from . import __version__
 from .alerts import Alert, AlertWatcher, draw_badge, render_toast
 from .ambient import SCENES, Scene, make_scene
 from .config import ROOT
 from .device import DeckBase
-from .gfx import new_key
+from .gfx import AMBER, new_key
 from .session import session_locked
 from .sources import make_sources
 from .tiles import OverlayTile, Tile, make_tile
@@ -50,29 +54,23 @@ def build_slots(names: list[str], key_count: int, cfg: dict, sources: dict) -> l
     return slots
 
 
+class Request:
+    """A command waiting for the loop thread; ``done`` is set once ``reply`` is filled in."""
+
+    def __init__(self, cmd: str, args: list[str]):
+        self.cmd = cmd
+        self.args = args
+        self.reply: dict = {"ok": False, "error": "not run"}
+        self.done = threading.Event()
+
+
 class App:
-    def __init__(self, cfg: dict, deck: DeckBase, sources: dict | None = None, watcher: AlertWatcher | None = None):
-        self.cfg = cfg
+    def __init__(self, cfg: dict, deck: DeckBase, sources: dict | None = None, watcher: AlertWatcher | None = None,
+                 config_loader: Callable[[], dict] | None = None):
         self.deck = deck
-        dk = cfg.get("deck", {})
-        am = cfg.get("ambient", {})
+        self.config_loader = config_loader
+        self._apply_settings(cfg)
         al = cfg.get("alerts", {})
-        self.tick_s = 1.0 / float(dk.get("tick_hz", 10))
-        self.budget_s = float(dk.get("flush_budget_ms", 60)) / 1000.0
-        self.anim_s = 1.0 / float(dk.get("anim_fps", 8))
-        self.gap = int(dk.get("gap_px", 24))
-        self.zoom_s = float(dk.get("zoom_seconds", 10))
-        self.brightness = int(dk.get("brightness", 80))
-        self.night_brightness = int(dk.get("night_brightness", 30))
-        self.night_start = _minutes(dk.get("night_start", "22:00"))
-        self.night_end = _minutes(dk.get("night_end", "07:00"))
-        self.idle_s = float(dk.get("idle_minutes", 10)) * 60
-        self.lock_poll_s = float(dk.get("lock_poll_seconds", 5))
-        self.lock_check = session_locked if bool(dk.get("off_on_lock", True)) else (lambda: False)
-        self.scene_names = [s for s in am.get("scenes", list(SCENES)) if s in SCENES]
-        self.scene_s = float(am.get("scene_minutes", 5)) * 60
-        self.ambient_fps = float(am.get("fps", 8))
-        self.toast_s = float(al.get("toast_seconds", 5))
         self.sources = sources if sources is not None else make_sources(cfg)
         if watcher is not None:
             self.watcher: AlertWatcher | None = watcher
@@ -105,9 +103,39 @@ class App:
         self._last_brightness_check = 0.0
         self.ticks = 0
         self._stop = False
-        self.slow_step_s = float(dk.get("slow_step_ms", 100)) / 1000.0
         self._slow_last_log = 0.0
         self._slow_suppressed = 0
+        self.slow_total = 0
+        self.last_ambient: dict | None = None
+        self.commands: queue.Queue = queue.Queue()
+        self.paused = False
+        self.brightness_override: int | None = None
+        self.started_at = time.time()
+        self.pid = os.getpid()
+
+    def _apply_settings(self, cfg: dict) -> None:
+        """Read every tunable from ``cfg`` (at start and on ``reload``)."""
+        self.cfg = cfg
+        dk = cfg.get("deck", {})
+        am = cfg.get("ambient", {})
+        al = cfg.get("alerts", {})
+        self.tick_s = 1.0 / float(dk.get("tick_hz", 10))
+        self.budget_s = float(dk.get("flush_budget_ms", 60)) / 1000.0
+        self.anim_s = 1.0 / float(dk.get("anim_fps", 8))
+        self.gap = int(dk.get("gap_px", 24))
+        self.zoom_s = float(dk.get("zoom_seconds", 10))
+        self.brightness = int(dk.get("brightness", 80))
+        self.night_brightness = int(dk.get("night_brightness", 30))
+        self.night_start = _minutes(dk.get("night_start", "22:00"))
+        self.night_end = _minutes(dk.get("night_end", "07:00"))
+        self.idle_s = float(dk.get("idle_minutes", 10)) * 60
+        self.lock_poll_s = float(dk.get("lock_poll_seconds", 5))
+        self.lock_check = session_locked if bool(dk.get("off_on_lock", True)) else (lambda: False)
+        self.scene_names = [s for s in am.get("scenes", list(SCENES)) if s in SCENES]
+        self.scene_s = float(am.get("scene_minutes", 5)) * 60
+        self.ambient_fps = float(am.get("fps", 8))
+        self.toast_s = float(al.get("toast_seconds", 5))
+        self.slow_step_s = float(dk.get("slow_step_ms", 100)) / 1000.0
 
     @property
     def tiles(self) -> list[Tile]:
@@ -122,6 +150,8 @@ class App:
     def mode(self) -> str:
         if self.locked:
             return "locked"
+        if self.paused:
+            return "paused"
         if self.toast is not None:
             return "toast"
         if self.zoom is not None:
@@ -129,6 +159,16 @@ class App:
         if self.scene is not None:
             return "ambient"
         return "board"
+
+    @property
+    def stopping(self) -> bool:
+        return self._stop
+
+    def tray_state(self) -> str:
+        """on / off / badge: what the tray icon shows."""
+        if self.paused or self.locked:
+            return "off"
+        return "badge" if self.badges else "on"
 
     # --- lifecycle -------------------------------------------------------------------
     def start(self) -> None:
@@ -167,6 +207,8 @@ class App:
         Scenes and toasts pace themselves through ``scene_next`` / ``toast_next``. Snapping those to
         the 10 Hz tick grid quantized an 8 fps scene down to 5 fps, so the loop wakes for them.
         """
+        if self.paused:
+            return max(0.0, 1.0 - elapsed)
         due = self.tick_s - elapsed
         if not self.locked:
             now = time.time() if now is None else now
@@ -183,10 +225,14 @@ class App:
         self._fps_keys += sent
         elapsed = now - self._fps_since
         if elapsed >= 60 and self._fps_frames and self.scene is not None:
+            self.last_ambient = {
+                "scene": self.scene.name, "fps": self._fps_frames / elapsed, "target": min(self.ambient_fps, self.scene.fps),
+                "flush_avg_ms": self._fps_flush / self._fps_frames * 1000, "flush_max_ms": self._fps_flush_max * 1000,
+                "keys": self._fps_keys / self._fps_frames, "slow": self._fps_slow, "at": now,
+            }
+            a = self.last_ambient
             log.info("ambient %s: %.1f fps (target %g), flush avg %.0f ms max %.0f ms, %.1f keys per frame, %d slow ticks",
-                     self.scene.name, self._fps_frames / elapsed, min(self.ambient_fps, self.scene.fps),
-                     self._fps_flush / self._fps_frames * 1000, self._fps_flush_max * 1000, self._fps_keys / self._fps_frames,
-                     self._fps_slow)
+                     a["scene"], a["fps"], a["target"], a["flush_avg_ms"], a["flush_max_ms"], a["keys"], a["slow"])
             self._reset_fps_stats(now)
 
     def _reset_fps_stats(self, now: float) -> None:
@@ -323,6 +369,145 @@ class App:
             self._invalidate()
             self._apply_brightness(now, force=True)
 
+    # --- commands (ctl, tray, dashboard) -----------------------------------------------
+    def submit(self, cmd: str, args: list[str], timeout: float = 3.0) -> dict:
+        """Run a command on the loop thread from another thread and wait for the reply."""
+        req = Request(cmd, list(args))
+        self.commands.put(req)
+        if not req.done.wait(timeout):
+            return {"ok": False, "error": f"no answer from the render loop within {timeout:g} s"}
+        return req.reply
+
+    def _drain_commands(self, now: float) -> None:
+        while True:
+            try:
+                req = self.commands.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                req.reply = self.command(req.cmd, req.args, now)
+            except Exception as exc:  # noqa: BLE001 - a bad command must not take the loop down
+                log.exception("command %s failed", req.cmd)
+                req.reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            finally:
+                req.done.set()
+
+    def command(self, cmd: str, args: list[str], now: float | None = None) -> dict:
+        """Execute one control command (on the loop thread; other threads go through ``submit``)."""
+        now = time.time() if now is None else now
+        if cmd == "status":
+            return {"ok": True, **self.status(now)}
+        if cmd == "wake":
+            self.wake(now)
+            return {"ok": True, "mode": self.mode}
+        if cmd == "scene":
+            name = args[0] if args else ""
+            if name not in SCENES:
+                return {"ok": False, "error": f"unknown scene '{name}' (known: {', '.join(SCENES)})"}
+            if name in self.scene_names:
+                self.scene_index = self.scene_names.index(name)
+            self.zoom = None
+            self.start_ambient(now, name)
+            if self.scene is None or self.scene.name != name:
+                return {"ok": False, "error": f"scene {name} failed to start"}
+            return {"ok": True, "scene": name, "paused": self.paused}
+        if cmd == "next":
+            if not self.scene_names:
+                return {"ok": False, "error": "no scenes configured"}
+            if self.scene is not None:
+                self.scene_index += 1
+            self.zoom = None
+            self.start_ambient(now)
+            return {"ok": True, "scene": self.scene.name if self.scene else None, "paused": self.paused}
+        if cmd == "pause":
+            self.set_paused(True, now)
+            return {"ok": True, "mode": self.mode}
+        if cmd == "resume":
+            self.set_paused(False, now)
+            return {"ok": True, "mode": self.mode}
+        if cmd == "brightness":
+            value = (args[0] if args else "").strip().lower()
+            if value == "auto":
+                self.brightness_override = None
+            else:
+                try:
+                    level = int(value)
+                except ValueError:
+                    level = -1
+                if not 0 <= level <= 100:
+                    return {"ok": False, "error": "brightness must be 0-100 or auto"}
+                self.brightness_override = level
+            self._apply_brightness(now, force=True)
+            return {"ok": True, "brightness": self._current_brightness, "override": self.brightness_override}
+        if cmd == "toast":
+            kind, title = args[0], args[1]
+            detail = args[2] if len(args) > 2 else ""
+            self.toast_queue.append(Alert(kind=kind.upper(), title=title.upper(), subject="test", detail=detail, color=AMBER, style="alert"))
+            return {"ok": True}
+        if cmd == "reload":
+            if self.config_loader is None:
+                return {"ok": False, "error": "no config loader"}
+            self.reload(self.config_loader())
+            return {"ok": True, "tiles": [t.name for t in self.tiles], "scenes": list(self.scene_names)}
+        if cmd == "quit":
+            log.info("quit requested")
+            self._stop = True
+            return {"ok": True}
+        return {"ok": False, "error": f"unknown command '{cmd}'"}
+
+    def wake(self, now: float) -> None:
+        """Back to the board from a scene or a zoom, as a key press would, without acting on a tile."""
+        self.last_press = now
+        if self.toast is not None:  # like a key press: dismissed, no badge
+            self._end_toast(badge=False)
+        if self.scene is not None:
+            self.stop_ambient()
+        if self.zoom is not None:
+            self.zoom = None
+            self._invalidate()
+
+    def set_paused(self, paused: bool, now: float) -> None:
+        """Paused: deck dark, one tick per second, nothing rendered; the sources keep polling."""
+        if paused == self.paused:
+            return
+        self.paused = paused
+        if paused:
+            log.info("paused: deck off")
+            self.stop_ambient()
+            self.zoom = None
+        else:
+            log.info("resumed")
+            self.last_press = now
+            self._invalidate()
+        self._apply_brightness(now, force=True)
+
+    def reload(self, cfg: dict) -> None:
+        """Take a fresh config: tunables, layout and scene list; the sources keep running."""
+        self._apply_settings(cfg)
+        self.slots = build_slots(cfg.get("layout", {}).get("keys", []), self.deck.key_count, cfg, self.sources)
+        self.badges = {}
+        self.zoom = None
+        self._invalidate()
+        self._apply_brightness(time.time(), force=True)
+        log.info("config reloaded: %s", ", ".join(t.name for t in self.tiles) or "no tiles")
+
+    def status(self, now: float) -> dict:
+        sources = {}
+        for name, src in self.sources.items():
+            last = float(getattr(src, "last_ok", 0.0) or 0.0)
+            sources[name] = {"age_s": round(now - last, 1) if last else None, "error": getattr(src, "error", None),
+                             "failures": int(getattr(src, "failures", 0) or 0)}
+        deck_info = getattr(self.deck, "info", None) or {}
+        return {
+            "version": __version__, "pid": self.pid, "mode": self.mode, "scene": self.scene.name if self.scene else None,
+            "paused": self.paused, "locked": self.locked, "brightness": self._current_brightness,
+            "brightness_override": self.brightness_override, "uptime_s": round(now - self.started_at, 1),
+            "idle_s": round(now - self.last_press, 1), "ticks": self.ticks, "slow_ticks": self.slow_total,
+            "ambient": self.last_ambient, "badges": [a.tile for a in self.badges.values()],
+            "toast": self.toast.title if self.toast else None, "tiles": [t.name for t in self.tiles],
+            "scenes": list(self.scene_names), "deck": deck_info or {"type": type(self.deck).__name__}, "sources": sources,
+        }
+
     # --- loop ------------------------------------------------------------------------
     def tick(self) -> None:
         now = time.time()
@@ -337,6 +522,8 @@ class App:
 
     def _tick(self, now: float, marks: list[tuple[str, float]]) -> None:
         """One pass of the loop; ``marks`` collects (step name, perf_counter) after each step."""
+        self._drain_commands(now)
+        marks.append(("commands", time.perf_counter()))
         while True:
             try:
                 key = self.presses.get_nowait()
@@ -347,7 +534,7 @@ class App:
         if now - self._last_lock_check >= self.lock_poll_s:
             self._check_lock(now)
             marks.append(("lock", time.perf_counter()))
-        if self.locked:
+        if self.locked or self.paused:
             self.deck.flush(self.budget_s)
             marks.append(("flush", time.perf_counter()))
             return
@@ -434,6 +621,7 @@ class App:
         if not slow:
             return
         self._fps_slow += 1
+        self.slow_total += 1
         if now - self._slow_last_log < 10:
             self._slow_suppressed += 1
             return
@@ -453,7 +641,12 @@ class App:
 
     def _apply_brightness(self, now: float, force: bool = False) -> None:
         self._last_brightness_check = now
-        level = self.night_brightness if self._is_night(now) else self.brightness
+        if self.paused or self.locked:
+            level = 0
+        elif self.brightness_override is not None:
+            level = self.brightness_override
+        else:
+            level = self.night_brightness if self._is_night(now) else self.brightness
         if force or level != self._current_brightness:
             self.deck.set_brightness(level)
             self._current_brightness = level
