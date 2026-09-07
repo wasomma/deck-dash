@@ -47,6 +47,10 @@ def single_instance(name: str = "Local\\deck-dash") -> bool:
 _PRIORITY_NAMES = {0x40: "idle", 0x4000: "below normal", 0x20: "normal", 0x8000: "above normal", 0x80: "high", 0x100: "realtime"}
 
 
+class _PowerThrottling(ctypes.Structure):
+    _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+
 class _MemoryPriority(ctypes.Structure):
     _fields_ = [("MemoryPriority", ctypes.c_ulong)]
 
@@ -63,13 +67,15 @@ class _JobCpuRate(ctypes.Structure):
 
 
 def normal_priority() -> str:
-    """Bring the process to normal CPU class and normal memory priority; say what was found and set.
+    """Normal CPU class, normal memory priority, no power throttling; say what was found and set.
 
-    Task Scheduler launches tasks at below-normal CPU priority (7) unless told otherwise, and even at
-    priority 5 its processes get memory priority 4 instead of 5. Measured on 2026-09-06: the former
-    starved the flush under load (150-320 ms spikes); the latter made an idle board-mode process log
-    100-140 ms flushes (2-5 a minute) that a shell-launched copy never showed. ``install_task.ps1``
-    registers with priority 5; this covers the rest and older registrations.
+    Task Scheduler launches a task at below-normal CPU priority (7) unless told otherwise, at memory
+    priority 4, and as a windowless background process that Windows 11 may run with efficiency QoS
+    (E-cores, coalesced timers). Measured on 2026-09-06: below normal starved the flush under load
+    (150-320 ms spikes); with everything else equal, task-launched board mode logged 100-140 ms
+    flushes several times a minute on an idle machine while a shell-launched copy logged none, and
+    opting the live process out of power throttling ended them at once (0 in 2 min) where memory
+    priority alone did not. ``install_task.ps1`` registers with priority 5; this covers the rest.
     """
     if sys.platform != "win32":
         return "n/a"
@@ -92,7 +98,10 @@ def normal_priority() -> str:
         mem.MemoryPriority = 5  # MEMORY_PRIORITY_NORMAL
         k.SetProcessInformation(proc, 0, ctypes.byref(mem), ctypes.sizeof(mem))
         k.GetProcessInformation(proc, 0, ctypes.byref(mem), ctypes.sizeof(mem))
-    return f"priority {now_class} (was {was_class}), memory priority {mem.MemoryPriority} (was {was_mem})"
+    throttle = _PowerThrottling(1, 0x1 | 0x4, 0)  # control execution speed + timer resolution; state 0 = never throttle
+    no_throttle = bool(k.SetProcessInformation(proc, 4, ctypes.byref(throttle), ctypes.sizeof(throttle)))  # 4 = ProcessPowerThrottling
+    return (f"priority {now_class} (was {was_class}), memory priority {mem.MemoryPriority} (was {was_mem}), "
+            f"power throttling {'off' if no_throttle else 'unchanged'}")
 
 
 def job_summary() -> str:

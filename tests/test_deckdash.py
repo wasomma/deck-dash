@@ -806,5 +806,5 @@ def test_normal_priority_reports_class_and_memory_priority():
     from deckdash.main import job_summary, normal_priority
 
     s = normal_priority()
-    assert s.startswith("priority normal") and "memory priority 5" in s
+    assert s.startswith("priority normal") and "memory priority 5" in s and "power throttling off" in s
     assert isinstance(job_summary(), str)
