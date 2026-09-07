@@ -245,7 +245,8 @@ function tickStatus() {
     st.innerHTML = "";
     Object.keys(s.sources).sort().forEach(function (name) {
       var src = s.sources[name], txt, cls;
-      if (src.error) { txt = "failing ×" + src.failures + ": " + src.error; cls = "bad"; }
+      if (src.error && src.failures) { txt = "failing ×" + src.failures + ": " + src.error; cls = "bad"; }
+      else if (src.error) { txt = src.error; cls = "muted"; }   // switched off, not broken
       else if (src.age_s === null) { txt = "no data yet"; cls = "muted"; }
       else { txt = dur(src.age_s) + " ago"; cls = "ok"; }
       st.appendChild(row(name, txt, cls));

@@ -68,8 +68,9 @@ def format_status(s: dict) -> str:
     for name, src in sorted((s.get("sources") or {}).items()):
         age = src.get("age_s")
         state = f"ok, {_dur(age)} ago" if age is not None else "no data yet"
-        if src.get("error"):
-            state += f"; failing x{src.get('failures', 0)}: {src['error']}"
+        if src.get("error"):  # no failures behind it = switched off, not broken
+            state += (f"; failing x{src['failures']}: {src['error']}" if src.get("failures")
+                      else f"; {src['error']}")
         lines.append(f"  {name:<8} {state}")
     return "\n".join(lines)
 

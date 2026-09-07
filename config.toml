@@ -46,6 +46,8 @@ ping_seconds = 5
 disk = "C:/"
 
 [gpu]
+enabled = true         # false on a machine with no NVIDIA card: NVML is the only way in, and the
+                       # poller would otherwise fail once a second for ever
 index = 0
 
 [bitaxe]

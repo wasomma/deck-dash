@@ -172,10 +172,13 @@ def test_validate_and_ctl(capsys):
         "version": "0.2.0", "pid": 7, "uptime_s": 3725, "mode": "ambient", "scene": "tokyo", "brightness": 30,
         "brightness_override": None, "ticks": 10, "slow_ticks": 0, "idle_s": 700, "badges": ["ci"],
         "ambient": {"scene": "tokyo", "fps": 13.9, "target": 14, "flush_avg_ms": 63, "flush_max_ms": 74, "slow": 0},
-        "sources": {"weather": {"age_s": 12, "error": None, "failures": 0}, "ci": {"age_s": None, "error": "boom", "failures": 3}},
+        "sources": {"weather": {"age_s": 12, "error": None, "failures": 0}, "ci": {"age_s": None, "error": "boom", "failures": 3},
+                    "gpu": {"age_s": None, "error": "disabled", "failures": 0}},
     })
     assert "mode ambient (tokyo)" in text and "up 1 h 02 min" in text and "badges: ci" in text
     assert "13.9 fps" in text and "failing x3: boom" in text and "12 s ago" in text
+    # An error with no failures behind it is a source that was switched off, not one that broke.
+    assert "no data yet; disabled" in text and "failing x0" not in text
     assert ctl.main(["--pipe", "deckdash-test-none", "status"]) == 1
     assert "not running" in capsys.readouterr().err
     assert deckdash_main(["ctl", "--pipe", "deckdash-test-none", "wake"]) == 1  # dispatched before the app's own parser

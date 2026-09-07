@@ -1,3 +1,4 @@
+import copy
 import json
 import pathlib
 import sys
@@ -15,6 +16,7 @@ from deckdash.ambient import SCENES, make_scene  # noqa: E402
 from deckdash.app import App  # noqa: E402
 from deckdash.canvas import Canvas  # noqa: E402
 from deckdash.device import SimDeck  # noqa: E402
+from deckdash.sources.gpu import GpuPoller  # noqa: E402
 from deckdash.sources.base import StaticSource  # noqa: E402
 from deckdash.sources.bitaxe import fmt_diff, fmt_hash, parse_axeos  # noqa: E402
 from deckdash.sources.bsod import merge_crashes, parse_events, summarize  # noqa: E402
@@ -808,3 +810,26 @@ def test_normal_priority_reports_class_and_memory_priority():
     s = normal_priority()
     assert s.startswith("priority normal") and "memory priority 5" in s and "power throttling off" in s
     assert isinstance(job_summary(), str)
+def test_the_gpu_switch(cfg):
+    """NVML is the only way into an NVIDIA card and nvmlInit() raises without the driver, so on a
+    machine with no NVIDIA GPU this poller failed once a second for ever and showed red on the
+    dashboard. Unlike the miner, the CI list and the VPS it has no empty value to switch it off,
+    so it has a flag; a switched-off source reports "disabled" and never counts a failure."""
+    off = copy.deepcopy(cfg)
+    off["gpu"]["enabled"] = False
+    src = GpuPoller(off)
+    assert src.enabled is False
+    src.start()
+    assert not src.is_alive(), "a disabled poller must not start a thread"
+    assert src.error == "disabled" and src.failures == 0 and src.last_ok == 0.0 and src.state == {}
+    src.stop()  # must be safe on a thread that was never started
+
+    started = []
+    on = copy.deepcopy(cfg)
+    assert "enabled" not in on["gpu"] or on["gpu"]["enabled"] is True  # the tracked default is on
+    on["gpu"]["enabled"] = True
+    src = GpuPoller(on)
+    # Not started for real: this machine has a card, and the test would then poll it every second.
+    src.start = lambda: started.append(True)
+    src.start()
+    assert started == [True]

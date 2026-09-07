@@ -61,20 +61,23 @@ PC, with the deck unplugged until step 3:
 5. `.venv\Scripts\python -m pip install -e .` - editable, and never a plain `pip install .`. The
    log, `config.local.toml`, the dashboard page and the calibration all resolve from the checkout,
    so a copied-in install would read the wrong ones.
-6. Say what this machine has, in `config.local.toml`. Three sources need something outside the PC
-   - a miner on the LAN, the `gh` CLI logged in, an SSH alias - and each has the same off switch,
-   an empty value, which stops the poller as well as the tile:
+6. Say what this machine has, in `config.local.toml`. Four sources need something this PC may not
+   have - a miner on the LAN, the `gh` CLI logged in, an SSH alias, an NVIDIA card - and each has
+   an off switch that stops the poller, not just the tile:
 
        [bitaxe]
        host = ""                 # no miner
        [ci]
        repos = []                # or [{ repo = "you/thing", label = "thing" }, ...]
+       [gpu]
+       enabled = false           # no NVIDIA card: NVML is the only way in
        [layout]
-       keys = ["clock", "weather", "forecast", "gpu",  "cpu",
+       keys = ["clock", "weather", "forecast", "",     "cpu",
                "net",   "",        "",         "",     "bsod",
                "news",  "news",    "news",     "news", "news"]
 
-   `[vps] services` is already empty in `config.toml`. The key list must stay fifteen entries;
+   `[vps] services` is already empty in `config.toml`. A switched-off source reads "disabled" on
+   the dashboard rather than red. The key list must stay fifteen entries;
    `""` leaves a key dark. Weather looks itself up from the public IP on first run and writes the
    coordinates here; add `[weather] units = "metric"` for C and km/h. The dashboard's settings
    form writes this same file, so most of this can wait until the deck is lit.

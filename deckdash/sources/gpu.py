@@ -11,14 +11,27 @@ HIST = 60
 
 class GpuPoller(Poller):
     def __init__(self, cfg: dict):
+        g = cfg.get("gpu", {})
         super().__init__("gpu", 1.0)
-        self.index = int(cfg.get("gpu", {}).get("index", 0))
+        self.enabled = bool(g.get("enabled", True))
+        self.index = int(g.get("index", 0))
         self._handle = None
         self._nvml = None
         self.name = "GPU"
         self.util_hist: deque = deque(maxlen=HIST)
         self.temp_hist: deque = deque(maxlen=HIST)
         self.power_hist: deque = deque(maxlen=HIST)
+
+    def start(self) -> None:
+        """No NVIDIA card, no thread. The miner, the CI list and the VPS each switch off by having
+        nothing configured, but there is no empty value to give this one, and ``nvmlInit()`` raises
+        on any machine without the driver - so on, say, an AMD box the poller failed once a second
+        for ever and the dashboard showed it red. ``[gpu] enabled = false`` is the switch, and it
+        reports "disabled" rather than a failure, the way the now-playing helper already did."""
+        if not self.enabled:
+            self.error = "disabled"
+            return
+        super().start()
 
     def _init(self) -> None:
         import pynvml
