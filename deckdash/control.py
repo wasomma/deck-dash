@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 DEFAULT_PIPE = "deckdash"
 SIM_PIPE = "deckdash-sim"
 TIMEOUT_S = 3.0
+RECV_TIMEOUT_S = 2.0  # a connected client that has not spoken by then is dropped: it must not own the accept loop
 
 # name -> (min args, max args, usage)
 COMMANDS: dict[str, tuple[int, int, str]] = {
@@ -92,6 +93,12 @@ class ControlServer(threading.Thread):
                 conn.close()
                 break
             try:
+                # The pipe's default ACL lets any local user open it read-only, and recv() waits
+                # forever, so a peer that connects and never speaks would park this thread and take
+                # the whole control channel down until a restart. Give it a deadline and move on.
+                if not conn.poll(RECV_TIMEOUT_S):
+                    log.warning("control client sent nothing within %g s; dropped", RECV_TIMEOUT_S)
+                    continue
                 cmd, args = conn.recv()
                 args = [str(a) for a in args]
                 err = validate(str(cmd), args)
@@ -151,16 +158,24 @@ def run_powershell(script: str, console: bool = False) -> int | None:
 
 
 def restart_script(root: Path) -> str:
+    """Stop then start the task. The -Start is in a ``finally`` so a throwing -Stop (or a -Stop
+    that killed the app before Start-ScheduledTask failed) still leaves the deck with an owner."""
     task = Path(root) / "tools" / "install_task.ps1"
-    return f"& '{task}' -Stop; Start-Sleep -Seconds 2; & '{task}' -Start"
+    return f"try {{ & '{task}' -Stop; Start-Sleep -Seconds 2 }} finally {{ & '{task}' -Start }}"
 
 
 def calibrate_script(root: Path) -> str:
+    """Free the deck, run the calibration tool in its own console, then start the task again.
+    The tool is interactive, so the restart is in a ``finally``: Ctrl+C or a crashing tool must not
+    leave the deck dark. Closing the console window with the X still skips it (Windows kills the
+    process outright) - the message says what to run then."""
     task = Path(root) / "tools" / "install_task.ps1"
     tool = Path(root) / "tools" / "calibrate.py"
     python = Path(sys.executable).with_name("python.exe")  # a console, not pythonw: the tool prints its instructions
-    return (f"& '{task}' -Stop; Start-Sleep -Seconds 1; & '{python}' '{tool}'; & '{task}' -Start; "
-            "Write-Host 'deck-dash restarted; press Enter to close'; Read-Host | Out-Null")
+    return (f"Write-Host 'If this window is closed with the X, run: {task} -Start'; "
+            f"try {{ & '{task}' -Stop; Start-Sleep -Seconds 1; & '{python}' '{tool}' }} "
+            f"finally {{ & '{task}' -Start; "
+            "Write-Host 'deck-dash restarted; press Enter to close'; Read-Host | Out-Null }")
 
 
 EDGE = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")

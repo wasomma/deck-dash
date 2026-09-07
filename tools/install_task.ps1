@@ -26,7 +26,9 @@ $launcher = Join-Path $root '.venv\Scripts\deckdashw.exe'   # from 'pip install 
 
 function Stop-DeckDashProcesses {
     Get-CimInstance Win32_Process | Where-Object {
-        ($_.Name -like 'python*' -and ($_.CommandLine -like '*-m deckdash*' -or $_.CommandLine -like '*\deckdashw.exe*' -or $_.CommandLine -like '*\deckdash.exe*') -and $_.CommandLine -notlike '* ctl *') -or ($_.CommandLine -like '*media_watch.ps1*' -and $_.Name -like 'powershell*')
+        # Only copies that own the Stream Deck. 'ctl' clients are short-lived, and a '--sim' run
+        # has its own pipe and no device, so it is meant to run beside the live app: leave both.
+        ($_.Name -like 'python*' -and ($_.CommandLine -like '*-m deckdash*' -or $_.CommandLine -like '*\deckdashw.exe*' -or $_.CommandLine -like '*\deckdash.exe*') -and $_.CommandLine -notlike '* ctl *' -and $_.CommandLine -notlike '*--sim*') -or ($_.CommandLine -like '*media_watch.ps1*' -and $_.Name -like 'powershell*')
     } | ForEach-Object {
         Write-Host ("stopping pid " + $_.ProcessId + " (" + $_.Name + ")")
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue

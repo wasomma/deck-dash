@@ -482,9 +482,15 @@ class App:
         self._apply_brightness(now, force=True)
 
     def reload(self, cfg: dict) -> None:
-        """Take a fresh config: tunables, layout and scene list; the sources keep running."""
+        """Take a fresh config: tunables, layout and scene list; the sources keep running.
+
+        The slots are built first, into a local: ``build_slots`` raises on an unknown tile name, and
+        a reload that reports an error must change nothing. Applying the settings first would leave
+        brightness, the night window, idle_minutes and the scene list from a rejected file live
+        behind the old layout."""
+        slots = build_slots(cfg.get("layout", {}).get("keys", []), self.deck.key_count, cfg, self.sources)
         self._apply_settings(cfg)
-        self.slots = build_slots(cfg.get("layout", {}).get("keys", []), self.deck.key_count, cfg, self.sources)
+        self.slots = slots
         self.badges = {}
         self.zoom = None
         self._invalidate()

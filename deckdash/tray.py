@@ -49,7 +49,7 @@ class Tray:
         self.icon = None
         self.enabled = False
         self._pystray = None
-        self._state: str | None = None
+        self._sig: tuple = ()
 
     # --- lifecycle ---------------------------------------------------------------------
     def start(self) -> bool:
@@ -59,9 +59,9 @@ class Tray:
             log.warning("tray disabled (pip install pystray): %s", exc)
             return False
         self._pystray = pystray
-        self._state = self.app.tray_state()
+        self._sig = self._signature()
         try:
-            self.icon = pystray.Icon("deck-dash", icon_image(self._state), "deck-dash", self._menu())
+            self.icon = pystray.Icon("deck-dash", icon_image(self._sig[0]), f"deck-dash: {self.app.mode}", self._menu())
             self.icon.run_detached()
         except Exception as exc:  # noqa: BLE001 - no tray is not a reason to stop rendering
             log.warning("tray disabled: %s", exc)
@@ -80,16 +80,36 @@ class Tray:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _signature(self) -> tuple:
+        """Everything the icon, the tooltip and the menu are drawn from. pystray's win32 backend
+        snapshots the menu into a native HMENU and only rebuilds it on ``update_menu()``, so a
+        change made from ``ctl``, a key press, the lock or the dashboard has to be pushed here -
+        otherwise "Pause" still reads Pause after ``ctl pause`` and clicking it resumes instead."""
+        return (self.app.tray_state(), self.app.mode, self.app.paused,
+                self.app.brightness_override, tuple(self.app.scene_names))
+
+    def _sync(self) -> bool:
+        """One pass: push anything that changed to the icon. True when something was pushed."""
+        sig = self._signature()
+        if sig == self._sig:
+            return False
+        state, mode, _, _, scenes = sig
+        try:
+            if state != self._sig[0]:
+                self.icon.icon = icon_image(state)
+            if mode != self._sig[1]:
+                self.icon.title = f"deck-dash: {mode}"
+            if scenes != self._sig[4]:
+                self.icon.menu = self._menu()  # reload can change the scene list
+            self._refresh()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("tray update failed: %s", exc)
+        self._sig = sig
+        return True
+
     def _watch(self) -> None:
         while self.icon is not None and not self.app.stopping:
-            state = self.app.tray_state()
-            if state != self._state:
-                self._state = state
-                try:
-                    self.icon.icon = icon_image(state)
-                    self.icon.title = f"deck-dash: {self.app.mode}"
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("tray update failed: %s", exc)
+            self._sync()
             time.sleep(1.0)
 
     # --- menu --------------------------------------------------------------------------

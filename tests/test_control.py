@@ -13,12 +13,49 @@ sys.path.insert(0, str(ROOT))
 from test_deckdash import cfg, sources  # noqa: E402,F401 - the shared fixtures
 
 from deckdash import ctl  # noqa: E402
-from deckdash.app import App  # noqa: E402
-from deckdash.control import ControlServer, pipe_address, send, validate  # noqa: E402
+from deckdash.app import App, Request  # noqa: E402
+from deckdash.control import (ControlServer, calibrate_script, pipe_address,  # noqa: E402
+                              restart_script, send, validate)
 from deckdash.device import SimDeck  # noqa: E402
 from deckdash.gfx import AMBER, DIM, GREEN  # noqa: E402
 from deckdash.main import main as deckdash_main  # noqa: E402
-from deckdash.tray import STATE_COLORS, icon_image  # noqa: E402
+from deckdash.tray import STATE_COLORS, Tray, icon_image  # noqa: E402
+
+
+class _FakeIcon:
+    """Stands in for pystray.Icon: counts what the watcher pushes, opens no window."""
+
+    def __init__(self):
+        self.icon = self.title = self._menu = None
+        self.updates = self.menus = 0
+
+    @property
+    def menu(self):
+        return self._menu
+
+    @menu.setter
+    def menu(self, value):
+        self._menu = value
+        self.menus += 1
+
+    def update_menu(self):
+        self.updates += 1
+
+
+class _FakeMenu:
+    SEPARATOR = object()
+
+    def __init__(self, *items):
+        self.items = items
+
+
+class _FakeMenuItem:
+    def __init__(self, text, action, checked=None, radio=False, default=False):
+        self.text, self.action, self.checked = text, action, checked
+
+
+class _FakePystray:
+    Menu, MenuItem = _FakeMenu, _FakeMenuItem
 
 
 def make_app(cfg, sources, tmp_path):
@@ -153,3 +190,95 @@ def test_tray_icon_images():
         assert img.getpixel((32, 32)) == tuple(color) + (255,)  # the centre key
         assert img.getpixel((0, 0))[3] == 0  # transparent corner
     assert STATE_COLORS == {"on": GREEN, "off": DIM, "badge": AMBER}
+
+
+def test_reload_is_atomic_when_the_layout_is_bad(cfg, sources, tmp_path):
+    """A reload that reports an error must change nothing: build_slots raises on an unknown tile
+    name, and the tunables used to be applied before it ran, so a typo in config.local.toml left
+    brightness, idle_minutes and the scene list from the rejected file live behind the old layout."""
+    app, deck = make_app(cfg, sources, tmp_path)
+    before = (app.brightness, app.idle_s, list(app.scene_names), [t.name for t in app.tiles], app.cfg)
+    bad = copy.deepcopy(cfg)
+    bad["layout"]["keys"] = ["nosuchtile"] + [""] * 14
+    bad["deck"]["brightness"] = 11
+    bad["deck"]["idle_minutes"] = 99
+    bad["ambient"]["scenes"] = ["life"]
+    app.config_loader = lambda: bad
+    req = Request("reload", [])
+    app.commands.put(req)
+    app.tick()  # the loop drains the queue and turns the KeyError into an error reply, as ctl sees it
+    assert req.done.is_set() and req.reply["ok"] is False and "nosuchtile" in req.reply["error"]
+    assert (app.brightness, app.idle_s, list(app.scene_names), [t.name for t in app.tiles], app.cfg) == before
+    app.tick()
+    assert deck.brightness == app.brightness  # the periodic re-apply cannot push a rejected level
+    app.stop()
+
+
+def test_a_silent_client_does_not_own_the_accept_loop(cfg, sources, tmp_path, monkeypatch):
+    """The pipe's default ACL lets any local user open it read-only and recv() waits forever, so a
+    peer that connects and never speaks used to park the only server thread: ctl and the dashboard
+    went dead until a restart while the tray still worked, so the app looked healthy."""
+    from multiprocessing.connection import Client
+
+    from deckdash import control
+
+    monkeypatch.setattr(control, "RECV_TIMEOUT_S", 0.3)
+    app, deck = make_app(cfg, sources, tmp_path)
+    name = f"deckdash-test-silent-{os.getpid()}"
+    server = ControlServer(app, pipe_address(name))
+    server.start()
+    assert server.ready.wait(5) and server.error is None
+
+    squatter = Client(pipe_address(name), family=control._family())  # connects, never sends
+    try:
+        result = {}
+        t = threading.Thread(target=lambda: result.update(send("status", [], pipe=name, timeout=5)))
+        t.start()
+        deadline = time.time() + 10
+        while t.is_alive() and time.time() < deadline:
+            app.tick()
+            time.sleep(0.01)
+        t.join(5)
+        assert result.get("ok") is True and result["mode"] == "board"  # served despite the squatter
+    finally:
+        squatter.close()
+        server.stop()
+        app.stop()
+
+
+def test_tray_pushes_outside_changes_to_the_menu(cfg, sources, tmp_path):
+    """pystray's win32 backend snapshots the menu into a native HMENU and only rebuilds it on
+    update_menu(), so a pause from ctl or the dashboard left the item reading "Pause" - clicking it
+    resumed instead. The watcher has to push icon, tooltip and menu."""
+    app, deck = make_app(cfg, sources, tmp_path)
+    tray = Tray(app, ROOT)
+    tray.icon = _FakeIcon()
+    tray._pystray = _FakePystray()
+    tray._sig = tray._signature()
+    assert tray._sync() is False  # nothing changed yet
+
+    app.command("pause", [])
+    assert tray._sync() is True
+    assert tray.icon.updates == 1 and tray.icon.icon is not None  # menu rebuilt, icon greyed
+    app.command("resume", [])
+    app.command("brightness", ["30"])
+    assert tray._sync() is True and tray.icon.updates == 2  # an override the tray never set
+    menus = tray.icon.menus
+    app.scene_names = ["life"]
+    assert tray._sync() is True and tray.icon.menus == menus + 1  # reload can change the scene list
+    app.stop()
+
+
+def test_task_scripts_restart_even_when_abandoned():
+    """install_task.ps1 -Stop kills the app and takes the tray with it, so every script that stops
+    it has to start it again from a finally: an aborted calibration must not leave the deck dark."""
+    root = pathlib.Path(r"C:\deck-dash")
+    restart = restart_script(root)
+    assert restart.startswith("try {") and "finally {" in restart
+    assert restart.index("-Stop") < restart.index("finally") < restart.index("-Start")
+    cal = calibrate_script(root)
+    assert "try {" in cal and "finally {" in cal
+    assert cal.index("calibrate.py") < cal.index("finally")
+    tail = cal[cal.index("finally"):]  # Ctrl+C or a crashing tool must still reach the -Start
+    assert "-Start" in tail and "Read-Host" in tail
+    assert "closed with the X" in cal[:cal.index("try {")]  # the one path a finally cannot cover
