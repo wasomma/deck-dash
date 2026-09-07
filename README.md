@@ -3,7 +3,7 @@
 A 15-key Stream Deck (gen-1, 3x5) as an ambient information display: live tiles for the
 clock, weather, GPU, CPU, network, a Bitaxe miner, GitHub CI, VPS health and the Windows
 crash log, a news ticker across the bottom row, a full-deck zoom view on press, and
-(Phase 3) full-deck animations when idle. It drives the deck directly over HID; the Elgato
+six full-deck scenes when idle. It drives the deck directly over HID; the Elgato
 software is not needed and must not be running.
 
 ## Setup
@@ -15,8 +15,14 @@ software is not needed and must not be running.
 4. Run: `.venv\Scripts\python -m deckdash`
 5. Run at logon (per-user Task Scheduler entry, restarts on failure, no admin needed), from
    your own terminal: `powershell -ExecutionPolicy Bypass -File tools\install_task.ps1`
-   (`-Status` to inspect, `-Remove` to unregister). The task runs `pythonw.exe`, so all
+   (`-Status` to inspect, `-Stop` and `-Start` to free the deck for a tool and take it back, `-Remove` to unregister). The task runs `pythonw.exe`, so all
    output goes to `logs\deckdash.log`. A second copy started by hand exits immediately.
+
+At start the app raises itself to normal CPU class and memory priority and opts out of Windows
+power throttling (a windowless task-launched process gets efficiency QoS otherwise, which
+stalled the USB flushes); the first log line says what it found and set, plus the job
+limits. Any loop step slower than `deck.slow_step_ms` (100 ms) is logged as a warning that
+names the step; the once-a-minute ambient fps line ends with the slow-tick count.
 
 No hardware handy: `.venv\Scripts\python -m deckdash --sim --seconds 15` writes
 `sim/canvas.png` every second; write a key index to `sim/press.txt` to simulate a press.
@@ -68,6 +74,8 @@ overridden there key by key.
 ## Data sources
 
 - Weather: Open-Meteo, no key. GPU: NVML. CPU/RAM/disk/net: psutil. WAN latency: `ping`.
+- CPU clock: the PDH counter `% Processor Performance` times `Processor Frequency` (ctypes, no
+  package), because psutil reports the nominal clock on Windows.
 - Bitaxe: AxeOS `GET /api/system/info` every 10 s.
 - CI: `gh api` (the logged-in GitHub CLI) for the latest workflow run and open PRs of each
   configured repo, every 2 min (30 s while a run is in progress).
