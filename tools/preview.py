@@ -47,7 +47,7 @@ def main() -> int:
         app._on_press(tile.slot, True)
         app.tick()
         deck.flush(10.0)
-        target = out / f"zoom-{tile.name}.png"
+        target = out / f"zoom-{tile.name.replace("|", "-")}.png"
         deck.write().replace(target)
         print(f"wrote {target}")
         app.zoom = None  # back to the board without triggering the zoom-press hook
