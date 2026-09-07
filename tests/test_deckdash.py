@@ -510,6 +510,7 @@ def test_app_scene_rotation(cfg, sources, tmp_path):
 
 def test_app_lock_turns_deck_off(cfg, sources, tmp_path):
     cfg["deck"]["lock_poll_seconds"] = 0
+    cfg["deck"]["night_start"] = cfg["deck"]["night_end"] = "00:00"  # no night window: unlock restores the day brightness whatever the clock says
     deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
     app = App(cfg, deck, sources=sources)
     locked = {"v": True}
