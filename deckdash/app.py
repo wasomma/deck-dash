@@ -105,6 +105,9 @@ class App:
         self._last_brightness_check = 0.0
         self.ticks = 0
         self._stop = False
+        self.slow_step_s = float(dk.get("slow_step_ms", 100)) / 1000.0
+        self._slow_last_log = 0.0
+        self._slow_suppressed = 0
 
     @property
     def tiles(self) -> list[Tile]:
@@ -180,9 +183,10 @@ class App:
         self._fps_keys += sent
         elapsed = now - self._fps_since
         if elapsed >= 60 and self._fps_frames and self.scene is not None:
-            log.info("ambient %s: %.1f fps (target %g), flush avg %.0f ms max %.0f ms, %.1f keys per frame",
+            log.info("ambient %s: %.1f fps (target %g), flush avg %.0f ms max %.0f ms, %.1f keys per frame, %d slow ticks",
                      self.scene.name, self._fps_frames / elapsed, min(self.ambient_fps, self.scene.fps),
-                     self._fps_flush / self._fps_frames * 1000, self._fps_flush_max * 1000, self._fps_keys / self._fps_frames)
+                     self._fps_flush / self._fps_frames * 1000, self._fps_flush_max * 1000, self._fps_keys / self._fps_frames,
+                     self._fps_slow)
             self._reset_fps_stats(now)
 
     def _reset_fps_stats(self, now: float) -> None:
@@ -190,6 +194,7 @@ class App:
         self._fps_flush = 0.0
         self._fps_flush_max = 0.0
         self._fps_keys = 0
+        self._fps_slow = 0
         self._fps_since = now
 
     # --- input -----------------------------------------------------------------------
@@ -322,18 +327,32 @@ class App:
     def tick(self) -> None:
         now = time.time()
         self.ticks += 1
+        marks: list[tuple[str, float]] = [("start", time.perf_counter())]
+        fetched_before = self._fetch_marks()
+        self._tick(now, marks)
+        self._report_slow(now, marks, fetched_before)
+
+    def _fetch_marks(self) -> dict[str, float]:
+        return {name: getattr(src, "last_ok", 0.0) for name, src in self.sources.items()}
+
+    def _tick(self, now: float, marks: list[tuple[str, float]]) -> None:
+        """One pass of the loop; ``marks`` collects (step name, perf_counter) after each step."""
         while True:
             try:
                 key = self.presses.get_nowait()
             except queue.Empty:
                 break
             self._handle_press(key, now)
+        marks.append(("presses", time.perf_counter()))
         if now - self._last_lock_check >= self.lock_poll_s:
             self._check_lock(now)
+            marks.append(("lock", time.perf_counter()))
         if self.locked:
             self.deck.flush(self.budget_s)
+            marks.append(("flush", time.perf_counter()))
             return
         self._poll_alerts(now)
+        marks.append(("alerts", time.perf_counter()))
         if self.toast is None and self.toast_queue:
             self._start_toast(self.toast_queue.popleft(), now)
         if self.toast is not None and now - self.toast_started >= self.toast_s:
@@ -343,7 +362,9 @@ class App:
                 for i, img in enumerate(render_toast(self.toast, self.gap, now - self.toast_started)[: self.deck.key_count]):
                     self.deck.set_key_image(i, img)
                 self.toast_next = now + self.anim_s
+                marks.append(("toast", time.perf_counter()))
             self.deck.flush(self.budget_s)
+            marks.append(("flush", time.perf_counter()))
             return
         if self.zoom is not None and now >= self.zoom_until:
             self.zoom = None
@@ -367,12 +388,14 @@ class App:
                 if self.scene is not None:
                     self.scene_next = now + 1.0 / max(0.5, min(self.ambient_fps, self.scene.fps))
                     self._fps_frames += 1
+                marks.append(("scene", time.perf_counter()))
         elif self.zoom is not None:
             if now >= self.zoom_next:
                 images = self.zoom.render_zoom(now) or []
                 for i, img in enumerate(images[: self.deck.key_count]):
                     self.deck.set_key_image(i, img)
                 self.zoom_next = now + self.zoom.zoom_refresh
+                marks.append(("zoom", time.perf_counter()))
         else:
             for tile in self.tiles:
                 if now < tile.next_due:
@@ -391,12 +414,35 @@ class App:
                     log.exception("tile %s failed to render", tile.name)
                     self.deck.set_key_image(tile.slot, tile.placeholder(tile.name, "render error"))
                 tile.next_due = now + tile.refresh
+            marks.append(("tiles", time.perf_counter()))
         t_flush = time.perf_counter()
         sent = self.deck.flush(self.budget_s)
+        marks.append(("flush", time.perf_counter()))
         if self.scene is not None:
-            self._fps_stats(now, time.perf_counter() - t_flush, sent)
+            self._fps_stats(now, marks[-1][1] - t_flush, sent)
         if now - self._last_brightness_check >= 30:
             self._apply_brightness(now)
+            marks.append(("brightness", time.perf_counter()))
+
+    def _report_slow(self, now: float, marks: list[tuple[str, float]], fetched_before: dict[str, float]) -> None:
+        """Name every tick step over ``deck.slow_step_ms`` (one warning per 10 s; the rest are counted).
+
+        The sources that completed a fetch during the tick are listed too: a CPU-bound source thread
+        can hold the GIL between the per-key writes of a flush.
+        """
+        slow = [f"{name} {(t1 - t0) * 1000:.0f} ms" for (_, t0), (name, t1) in zip(marks, marks[1:]) if t1 - t0 >= self.slow_step_s]
+        if not slow:
+            return
+        self._fps_slow += 1
+        if now - self._slow_last_log < 10:
+            self._slow_suppressed += 1
+            return
+        fetched = [n for n, t in self._fetch_marks().items() if t != fetched_before.get(n)]
+        more = f" (+{self._slow_suppressed} more in the last 10 s)" if self._slow_suppressed else ""
+        log.warning("slow tick in %s: %s; tick %.0f ms; sources fetched meanwhile: %s%s", self.mode, ", ".join(slow),
+                    (marks[-1][1] - marks[0][1]) * 1000, ", ".join(fetched) or "none", more)
+        self._slow_last_log = now
+        self._slow_suppressed = 0
 
     def _is_night(self, now: float) -> bool:
         lt = time.localtime(now)

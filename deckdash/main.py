@@ -44,6 +44,29 @@ def single_instance(name: str = "Local\\deck-dash") -> bool:
     return kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
 
 
+_PRIORITY_NAMES = {0x40: "idle", 0x4000: "below normal", 0x20: "normal", 0x8000: "above normal", 0x80: "high", 0x100: "realtime"}
+
+
+def normal_priority() -> str:
+    """Raise a below-normal or idle process to normal and return the resulting class name.
+
+    Task Scheduler starts tasks at below normal (priority 7) unless told otherwise; measured on
+    2026-09-06 that starved the render loop (flush max 150-320 ms once a minute, 66-72 ms at normal).
+    ``install_task.ps1`` registers with priority 5 (normal); this covers an older registration.
+    """
+    if sys.platform != "win32":
+        return "n/a"
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p  # the pseudo handle is -1: keep all 64 bits
+    kernel32.GetPriorityClass.argtypes = [ctypes.c_void_p]
+    kernel32.GetPriorityClass.restype = ctypes.c_uint
+    kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    proc = kernel32.GetCurrentProcess()
+    if kernel32.GetPriorityClass(proc) in (0x4000, 0x40):
+        kernel32.SetPriorityClass(proc, 0x20)
+    return _PRIORITY_NAMES.get(kernel32.GetPriorityClass(proc), "unknown")
+
+
 def open_with_retry(deck: RealDeck, retry_s: float = 10.0) -> None:
     """Wait for the deck rather than crash: at logon the USB stack may still be waking up."""
     attempt = 0
@@ -89,6 +112,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.ambient is not None:
         app.forced_scene = args.ambient
         app.start_ambient(time.time(), args.ambient)
-    log.info("deckdash %s starting (%s)", __version__, "simulator" if args.sim else "hardware")
+    log.info("deckdash %s starting (%s), priority %s", __version__, "simulator" if args.sim else "hardware", normal_priority())
     app.run(max_seconds=args.seconds or None)
     return 0

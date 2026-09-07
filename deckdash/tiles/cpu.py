@@ -26,7 +26,10 @@ class CpuTile(Tile):
         arc_gauge(d, (36, 32), 27, 6, s["cpu"] / 100, CYAN)
         text(d, (36, 19), "CPU", 8, DIM)
         text(d, (36, 33), f"{s['cpu']:.0f}%", 17)
-        text(d, (36, 47), f"{s['mem_used'] / gb:.0f}/{s['mem_total'] / gb:.0f}G", 9, DIM, weight="semibold")
+        if s.get("ghz"):
+            text(d, (36, 47), f"{s['ghz']:.1f} GHz", 9, DIM, weight="semibold")
+        else:  # no PDH counter: the RAM line as before
+            text(d, (36, 47), f"{s['mem_used'] / gb:.0f}/{s['mem_total'] / gb:.0f}G", 9, DIM, weight="semibold")
         hbar(d, (12, 63, 60, 68), s["mem_used"] / max(1, s["mem_total"]), CYAN)
         return img
 

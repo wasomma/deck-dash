@@ -82,7 +82,10 @@ Write-Host ("workdir    : " + $root)
 $action = New-ScheduledTaskAction -Execute $python -Argument '-m deckdash' -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $trigger.Delay = 'PT20S'   # let the USB stack and the network settle after logon
+# Priority 5 = NORMAL_PRIORITY_CLASS. The default 7 (below normal) starved the render loop:
+# flush max 150-320 ms once a minute on every scene; 66-72 ms at normal (Phase 6, 2026-09-06).
 $settings = New-ScheduledTaskSettingsSet `
+    -Priority 5 `
     -RestartCount 99 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `

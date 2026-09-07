@@ -737,3 +737,64 @@ def test_app_sleeps_for_due_frames(cfg, sources, tmp_path):
     app.locked = True
     app.scene_next = now + 0.03
     assert app._sleep_s(0.0, now) == pytest.approx(app.tick_s)  # locked: nothing animates
+
+
+# --- Phase 6: slow-step report, PDH clock ----------------------------------------------------------
+class FakeClock:
+    def __init__(self, ghz):
+        self.ghz = ghz
+        self.error = None
+
+    def read(self):
+        return self.ghz
+
+
+def test_sys_poller_reports_the_pdh_clock(cfg):
+    from deckdash.sources.sysmon import SysPoller
+
+    assert SysPoller(cfg, clock=FakeClock(4.9)).fetch()["ghz"] == 4.9
+    assert SysPoller(cfg, clock=FakeClock(None)).fetch()["ghz"] == 0.0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PDH is Windows only")
+def test_cpu_clock_reads_a_plausible_frequency():
+    from deckdash.sources.pdh import CpuClock
+
+    clock = CpuClock()
+    clock.read()  # warm-up sample
+    time.sleep(0.3)
+    ghz = clock.read()
+    clock.close()
+    assert clock.error is None
+    assert ghz is not None and 0.3 < ghz < 8.0
+
+
+def test_cpu_tile_shows_the_clock_or_falls_back_to_ram(cfg, sources):
+    with_clock = make_tile("cpu", cfg, sources).render(time.time())
+    st = dict(sources["sys"].state)
+    st["ghz"] = 0.0
+    without = make_tile("cpu", cfg, {**sources, "sys": StaticSource(st)}).render(time.time())
+    assert with_clock.size == without.size == (72, 72)
+    assert with_clock.tobytes() != without.tobytes()
+
+
+def test_slow_tick_is_logged_once_per_10s(cfg, sources, tmp_path, caplog, monkeypatch):
+    cfg["deck"]["slow_step_ms"] = 50
+    deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
+    app = App(cfg, deck, sources=sources)
+    app.start()
+    real_flush = deck.flush
+
+    def slow_flush(budget):
+        time.sleep(0.08)
+        return real_flush(budget)
+
+    monkeypatch.setattr(deck, "flush", slow_flush)
+    with caplog.at_level("WARNING", logger="deckdash.app"):
+        app.tick()
+        app.tick()  # inside the 10 s window: counted, not logged
+    msgs = [r.getMessage() for r in caplog.records if "slow tick" in r.getMessage()]
+    assert len(msgs) == 1
+    assert "flush" in msgs[0] and "board" in msgs[0]
+    assert app._fps_slow == 2 and app._slow_suppressed == 1
+    app.stop()

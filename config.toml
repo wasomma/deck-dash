@@ -14,6 +14,7 @@ tick_hz = 10           # render loop rate
 anim_fps = 8           # animated tiles (weather icon, pickaxe, pulsing CI dot)
 clock_fps = 4          # sweeping second hand
 flush_budget_ms = 60   # max time per tick spent sending key images; measured: a full 15-key repaint takes 60 ms
+slow_step_ms = 100     # a loop step (render, flush, alerts, lock poll) slower than this is logged, one warning per 10 s
 zoom_seconds = 10
 idle_minutes = 10      # ambient scenes after this long without a key press; 0 disables them
 off_on_lock = true     # deck dark while the Windows session is locked

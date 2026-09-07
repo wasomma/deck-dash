@@ -10,14 +10,16 @@ from collections import deque
 import psutil
 
 from .base import Poller
+from .pdh import CpuClock
 
 HIST = 60
 _PING_RE = re.compile(r"time[=<]\s*(\d+)\s*ms", re.IGNORECASE)
 
 
 class SysPoller(Poller):
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, clock: CpuClock | None = None):
         super().__init__("sys", 1.0)
+        self.clock = CpuClock() if clock is None else clock  # opened lazily on the poller thread
         self.disk = cfg.get("net", {}).get("disk", "C:/")
         self.cpu_hist: deque = deque(maxlen=HIST)
         self.down_hist: deque = deque(maxlen=HIST)
@@ -29,7 +31,6 @@ class SysPoller(Poller):
     def fetch(self) -> dict:
         cpu = psutil.cpu_percent(interval=None)
         per_core = psutil.cpu_percent(interval=None, percpu=True)
-        freq = psutil.cpu_freq()
         vm = psutil.virtual_memory()
         du = psutil.disk_usage(self.disk)
         io = psutil.net_io_counters()
@@ -46,7 +47,7 @@ class SysPoller(Poller):
         return {
             "cpu": cpu,
             "per_core": per_core,
-            "ghz": (freq.current / 1000.0) if freq else 0.0,
+            "ghz": self.clock.read() or 0.0,  # 0 = no PDH counter (psutil only knows the nominal clock)
             "mem_used": vm.used,
             "mem_total": vm.total,
             "disk_used": du.used,
