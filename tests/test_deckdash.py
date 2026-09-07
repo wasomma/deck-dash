@@ -471,6 +471,20 @@ def test_weather_scene_every_condition(cfg):
             assert len(scene.frame(time.time() + k)) == 15
 
 
+def test_weather_scene_landmarks_avoid_the_bezel(cfg):
+    """The gaps between keys are invisible, so nothing with a shape may be left in one."""
+    scene = make_scene("weather", cfg, {"weather": StaticSource(weather_state())}, seed=2)
+    ink = [[scene.props.getpixel((x, y)) > 0 for x in range(scene.w)] for y in range(scene.h)]
+    band = range(gfx.KEY + scene.gap + gfx.KEY, 2 * (gfx.KEY + scene.gap))  # row 1 to row 2
+    assert not any(any(ink[y]) for y in band), "a tree or roof is stranded in the horizontal bezel"
+    for key in range(10, 15):  # the treeline reaches every key of the bottom row
+        x0, y0, x1, y1 = scene.canvas.key_box(key)
+        assert any(any(row[x0:x1]) for row in ink[y0:y1]), f"key {key} has no land detail"
+    wx0, wy0, wx1, wy1 = scene.window  # the lit barn window, inside one key
+    assert any(x0 <= wx0 and wx1 <= x1 and y0 <= wy0 and wy1 <= y1
+               for x0, y0, x1, y1 in (scene.canvas.key_box(k) for k in range(15)))
+
+
 def test_app_idle_to_ambient_and_wake(cfg, sources, tmp_path):
     cfg["deck"]["idle_minutes"] = 0.1 / 60  # 0.1 s
     cfg["deck"]["off_on_lock"] = False

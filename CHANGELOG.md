@@ -1,0 +1,78 @@
+# Changelog
+
+All notable changes to deck-dash are recorded here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[semantic versioning](https://semver.org/spec/v2.0.0.html). Before 1.0.0 the minor number carries
+features and the patch number carries fixes. A release is tagged `vX.Y.Z` on the merge commit, and
+the GitHub release notes are that version's section of this file.
+
+The version itself lives in `deckdash/__init__.py`; `pyproject.toml` reads it from there.
+
+## [0.3.0] - 2026-09-07
+
+### Changed
+
+- The **ambient weather scene** is a view out of a window rather than a bare sky. Under the clouds
+  there is now land: two ridges receding into haze, hills, and a field with a fence, grass and
+  scattered clumps. A treeline, a lone tree and a barn with a silo stand on top of them. Each piece
+  is a silhouette mask built once when the scene starts and recoloured every frame, hazed toward
+  the current sky colour by how far away it is, so the landscape is lit by whatever the sky is
+  doing and there is no second palette to keep in step with sunrise and sunset.
+- The sun and the moon rise and set behind the ridges on a real arc, and the moon is drawn at
+  tonight's actual phase.
+- Snow settles along the terrain crests, rain throws splashes on the field, and fog banks lie on
+  the land instead of hanging in mid-sky.
+- A clear sky, the case that looked plainest, also gets cirrus wisps, gliding birds, and an
+  occasional shooting star after dark.
+
+### Fixed
+
+- Landmarks are placed off the key rows rather than off the canvas. The 24 px of bezel between the
+  middle and bottom rows is invisible, and a first pass left the whole treeline inside it; a thin
+  shape stranded in a gap simply disappears. `test_weather_scene_landmarks_avoid_the_bezel` fails
+  if it happens again.
+
+### Performance
+
+- The scene costs 4.1-5.5 ms per frame in the simulator, against a 71 ms budget at 14 fps. On the
+  hardware it holds 13.9 fps with no slow ticks, but the moving grass makes all five bottom-row
+  keys dirty every frame: flush is 42 ms average and 61 ms worst, against 15-21 ms before, at
+  9.8 keys per frame against 3.4-5.0. Comfortable, with less headroom than it had.
+
+## [0.2.0] - 2026-09-06
+
+### Added
+
+- `deckdash` as an application: a console entry point, a named-pipe control channel with the
+  `deckdash ctl` CLI, and a tray icon for wake, scene, pause, brightness, log, config, recalibrate,
+  restart and quit.
+- A dashboard on 127.0.0.1 only, with a live deck preview and a window to open it in.
+- A `[gpu] enabled` switch, the one source that had no way to turn it off.
+
+### Fixed
+
+- Quit works while waiting for a deck that never arrives.
+- The tray, the dashboard and the pipe start before the deck is opened, so the app is reachable
+  when no deck is attached.
+- `install_task.ps1` reads `hidapi_dir` from `config.local.toml` first, and `hidapi_dir` has a
+  generic default rather than one machine's path.
+- The dashboard refuses cross-site posts and rebound hosts.
+
+## [0.1.0] - 2026-09-06
+
+### Added
+
+- The core loop: a virtual full-deck canvas sliced into keys, dirty-key hashing, a per-tick byte
+  budget with round-robin carry-over, reconnect on write failure, and a simulator that needs no
+  hardware.
+- Tiles for clock, weather, a five-hour forecast, GPU, CPU, network, Bitaxe, CI, VPS health, BSOD
+  watch and a news marquee, each with a full-deck zoom view.
+- Ambient scenes shown after the idle timeout: `weather`, `plasma`, `life`, `matrix`, `aquarium`
+  and `tokyo`.
+- Alerts, night brightness, a dark deck while the session is locked, and an at-logon Task Scheduler
+  entry installed by `tools/install_task.ps1`.
+
+[0.3.0]: https://github.com/wasomma/deck-dash/releases/tag/v0.3.0
+[0.2.0]: https://github.com/wasomma/deck-dash/releases/tag/v0.2.0
+[0.1.0]: https://github.com/wasomma/deck-dash/releases/tag/v0.1.0
