@@ -90,6 +90,7 @@ class App:
         self.scene_started = 0.0
         self.scene_next = 0.0
         self.forced_scene: str | None = None
+        self._reset_fps_stats(time.time())
         self.toast: Alert | None = None
         self.toast_started = 0.0
         self.toast_next = 0.0
@@ -151,11 +152,45 @@ class App:
                 self.tick()
                 if deadline is not None and time.monotonic() >= deadline:
                     break
-                time.sleep(max(0.0, self.tick_s - (time.monotonic() - t0)))
+                time.sleep(self._sleep_s(time.monotonic() - t0))
         except KeyboardInterrupt:
             log.info("interrupted")
         finally:
             self.stop()
+
+    def _sleep_s(self, elapsed: float, now: float | None = None) -> float:
+        """Seconds to sleep after a tick: until the next tick, or sooner when an animation frame is due.
+
+        Scenes and toasts pace themselves through ``scene_next`` / ``toast_next``. Snapping those to
+        the 10 Hz tick grid quantized an 8 fps scene down to 5 fps, so the loop wakes for them.
+        """
+        due = self.tick_s - elapsed
+        if not self.locked:
+            now = time.time() if now is None else now
+            if self.toast is not None:
+                due = min(due, self.toast_next - now)
+            elif self.scene is not None:
+                due = min(due, self.scene_next - now)
+        return max(0.0, due)
+
+    def _fps_stats(self, now: float, flush_s: float, sent: int) -> None:
+        """Once a minute in ambient mode, log the achieved frame rate and the flush cost (a hardware check)."""
+        self._fps_flush += flush_s
+        self._fps_flush_max = max(self._fps_flush_max, flush_s)
+        self._fps_keys += sent
+        elapsed = now - self._fps_since
+        if elapsed >= 60 and self._fps_frames and self.scene is not None:
+            log.info("ambient %s: %.1f fps (target %g), flush avg %.0f ms max %.0f ms, %.1f keys per frame",
+                     self.scene.name, self._fps_frames / elapsed, min(self.ambient_fps, self.scene.fps),
+                     self._fps_flush / self._fps_frames * 1000, self._fps_flush_max * 1000, self._fps_keys / self._fps_frames)
+            self._reset_fps_stats(now)
+
+    def _reset_fps_stats(self, now: float) -> None:
+        self._fps_frames = 0
+        self._fps_flush = 0.0
+        self._fps_flush_max = 0.0
+        self._fps_keys = 0
+        self._fps_since = now
 
     # --- input -----------------------------------------------------------------------
     def _on_press(self, key: int, down: bool) -> None:
@@ -216,6 +251,7 @@ class App:
             return
         self.scene_started = now
         self.scene_next = 0.0
+        self._reset_fps_stats(now)
         log.info("ambient: %s", name)
 
     def stop_ambient(self) -> None:
@@ -330,6 +366,7 @@ class App:
                     self.deck.set_key_image(i, img)
                 if self.scene is not None:
                     self.scene_next = now + 1.0 / max(0.5, min(self.ambient_fps, self.scene.fps))
+                    self._fps_frames += 1
         elif self.zoom is not None:
             if now >= self.zoom_next:
                 images = self.zoom.render_zoom(now) or []
@@ -354,7 +391,10 @@ class App:
                     log.exception("tile %s failed to render", tile.name)
                     self.deck.set_key_image(tile.slot, tile.placeholder(tile.name, "render error"))
                 tile.next_due = now + tile.refresh
-        self.deck.flush(self.budget_s)
+        t_flush = time.perf_counter()
+        sent = self.deck.flush(self.budget_s)
+        if self.scene is not None:
+            self._fps_stats(now, time.perf_counter() - t_flush, sent)
         if now - self._last_brightness_check >= 30:
             self._apply_brightness(now)
 

@@ -22,7 +22,7 @@ lock_poll_seconds = 5
 [ambient]
 scenes = ["weather", "plasma", "life", "matrix", "aquarium", "tokyo"]   # rotation order
 scene_minutes = 5      # each scene runs this long before the next one
-fps = 8                # ceiling for full-deck animation (a 15-key repaint is 60 ms on the gen-1 deck)
+fps = 14               # ceiling for full-deck animation; a 15-key repaint is 60 ms on the gen-1 deck, so 16 is the bus limit
 
 [clock]
 twelve_hour = true

@@ -19,7 +19,7 @@ BUBBLE = (170, 210, 255)
 
 class AquariumScene(Scene):
     name = "aquarium"
-    fps = 8.0
+    fps = 14.0
 
     def __init__(self, cfg, sources, seed=None):
         super().__init__(cfg, sources, seed)

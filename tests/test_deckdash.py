@@ -719,3 +719,21 @@ def test_fmt_helpers():
     assert gfx.fmt_rate(830 * 1024) == "830K"
     assert gfx.fmt_duration(90000) == "1d 1h"
     assert gfx.fit_size("12345678901234567890", 40, 20) < 20
+
+
+def test_app_sleeps_for_due_frames(cfg, sources, tmp_path):
+    """The loop wakes for scene and toast frames instead of snapping them to the tick grid."""
+    cfg["deck"]["off_on_lock"] = False
+    deck = SimDeck(gap=24, out_dir=tmp_path, interval=1e9)
+    app = App(cfg, deck, sources=sources)
+    now = 1000.0
+    assert app._sleep_s(0.0, now) == pytest.approx(app.tick_s)  # board: plain tick
+    app.start_ambient(now, "plasma")
+    app.scene_next = now + 0.03
+    assert app._sleep_s(0.0, now) == pytest.approx(0.03)  # a frame is due before the next tick
+    app.scene_next = now + 5.0
+    assert app._sleep_s(0.0, now) == pytest.approx(app.tick_s)  # never later than the tick
+    assert app._sleep_s(app.tick_s + 1.0, now) == 0.0  # an overrun tick does not sleep
+    app.locked = True
+    app.scene_next = now + 0.03
+    assert app._sleep_s(0.0, now) == pytest.approx(app.tick_s)  # locked: nothing animates

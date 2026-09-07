@@ -26,7 +26,7 @@ def _glyph_set() -> tuple[str, str | None]:
 
 class MatrixScene(Scene):
     name = "matrix"
-    fps = 8.0
+    fps = 14.0
 
     def __init__(self, cfg, sources, seed=None):
         super().__init__(cfg, sources, seed)
@@ -52,26 +52,29 @@ class MatrixScene(Scene):
         for c in range(self.cols):
             self.drops.append(self._new_drop(start_anywhere=True))
         self.blank = Image.new("RGB", (COL_W, ROW_H), BLACK)
+        self.last_t = 0.0
         self.canvas.img.paste(BLACK, (0, 0, self.w, self.h))
 
     def _new_drop(self, start_anywhere: bool = False) -> dict:
         return {
             "y": self.rng.uniform(-self.rows, self.rows) if start_anywhere else self.rng.uniform(-self.rows * 0.8, -2),
-            "speed": self.rng.uniform(0.35, 1.1),
+            "speed": self.rng.uniform(2.8, 8.8),  # rows per second (was 0.35-1.1 per frame at 8 fps)
             "len": self.rng.randint(5, 16),
         }
 
     def draw(self, t: float) -> None:
         img = self.canvas.img
+        dt = min(0.5, max(0.0, t - self.last_t))
+        self.last_t = t
         for c, drop in enumerate(self.drops):
-            drop["y"] += drop["speed"]
+            drop["y"] += drop["speed"] * dt
             head = int(drop["y"])
             if head - drop["len"] > self.rows:
                 self.drops[c] = self._new_drop()
                 continue
             column = self.cells[c]
             for r in range(self.rows):
-                if self.rng.random() < 0.02:
+                if self.rng.random() < 0.16 * dt:  # glyph churn: 0.02 per frame at the old 8 fps
                     column[r] = self.rng.randrange(len(self.glyphs))
                 d = head - r
                 if d < 0 or d > drop["len"]:

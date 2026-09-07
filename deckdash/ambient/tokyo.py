@@ -69,7 +69,7 @@ def _rgba(color) -> tuple:
 
 class TokyoScene(Scene):
     name = "tokyo"
-    fps = 8.0
+    fps = 14.0
 
     def __init__(self, cfg, sources, seed=None):
         super().__init__(cfg, sources, seed)

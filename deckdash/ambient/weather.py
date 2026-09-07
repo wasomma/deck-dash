@@ -39,7 +39,7 @@ def _minute_of(iso: str, fallback: float) -> float:
 
 class WeatherScene(Scene):
     name = "weather"
-    fps = 6.0
+    fps = 14.0
 
     def __init__(self, cfg, sources, seed=None):
         super().__init__(cfg, sources, seed)

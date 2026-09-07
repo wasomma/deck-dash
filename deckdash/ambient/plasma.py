@@ -24,7 +24,7 @@ def _palette(hue0: float, hue_span: float) -> np.ndarray:
 
 class PlasmaScene(Scene):
     name = "plasma"
-    fps = 8.0
+    fps = 14.0
     SCALE = 4
 
     def __init__(self, cfg, sources, seed=None):
