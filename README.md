@@ -32,6 +32,61 @@ No hardware handy: `.venv\Scripts\python -m deckdash --sim --seconds 15` writes
 `.venv\Scripts\python tools\preview.py` renders the board and every zoom view with live
 data into `sim/board.png` and `sim/zoom-*.png`.
 
+## A second machine
+
+The gen-1 deck's siblings are drop-in: the Stream Deck Original, Original V2 and MK.2 are all
+fifteen 72x72 keys, and nothing in the layout or the scenes assumes more. On a fresh Windows 11
+PC, with the deck unplugged until step 3:
+
+1. Python 3.13, then clone this repo anywhere (the task takes its working directory from the
+   script's own path, so no path is baked in), `python -m venv .venv`, and
+   `.venv\Scripts\python -m pip install -r requirements.txt`.
+2. `hidapi.dll` from `hidapi-win.zip` (the libusb/hidapi GitHub releases) into a folder of your
+   choosing, say `C:\Tools\hidapi`. Take it from the zip's **x64** folder: the x86 copy loads
+   without complaint and then finds no deck, which reads like a missing device rather than the
+   wrong DLL.
+3. Quit the Elgato Stream Deck software and turn off its launch-at-startup, or uninstall it. Only
+   one process can hold the device, and if it is running it holds it. Then plug the deck in.
+4. Create `config.local.toml` next to `config.toml`. It is gitignored, every table in
+   `config.toml` can be overridden there key by key, and it is where everything about *this*
+   machine belongs - starting with the DLL:
+
+       [deck]
+       hidapi_dir = "C:/Tools/hidapi"
+
+   `tools\install_task.ps1` reads that file first and `config.toml` second, so this one entry is
+   enough; the tracked `config.toml` stays untouched and keeps pulling clean.
+5. `.venv\Scripts\python -m pip install -e .` - editable, and never a plain `pip install .`. The
+   log, `config.local.toml`, the dashboard page and the calibration all resolve from the checkout,
+   so a copied-in install would read the wrong ones.
+6. Say what this machine has, in `config.local.toml`. Three sources need something outside the PC
+   - a miner on the LAN, the `gh` CLI logged in, an SSH alias - and each has the same off switch,
+   an empty value, which stops the poller as well as the tile:
+
+       [bitaxe]
+       host = ""                 # no miner
+       [ci]
+       repos = []                # or [{ repo = "you/thing", label = "thing" }, ...]
+       [layout]
+       keys = ["clock", "weather", "forecast", "gpu",  "cpu",
+               "net",   "",        "",         "",     "bsod",
+               "news",  "news",    "news",     "news", "news"]
+
+   `[vps] services` is already empty in `config.toml`. The key list must stay fifteen entries;
+   `""` leaves a key dark. Weather looks itself up from the public IP on first run and writes the
+   coordinates here; add `[weather] units = "metric"` for C and km/h. The dashboard's settings
+   form writes this same file, so most of this can wait until the deck is lit.
+7. `.venv\Scripts\python -m deckdash` to watch it come up, and calibrate the bezel gap once on
+   the real deck - `.venv\Scripts\python tools\calibrate.py`, key 14 saves `gap_px`. Ctrl+C to
+   stop.
+8. `powershell -ExecutionPolicy Bypass -File tools\install_task.ps1` from your own terminal (not
+   a sandboxed one: the hidapi.dll check has to see the real file system) registers the logon task
+   and starts it. The tray icon and `http://127.0.0.1:8770` come with it.
+
+Optional and independent of each other: the Claude tile and its five hooks
+(`docs/claude-hooks.md`), the now-playing overlay (`[nowplaying] enabled`, which needs
+`tools\media_watch.ps1`), and the news feeds (`[news] feeds`).
+
 ## Using it
 
 One process owns the deck and shows three other faces: a tray icon, a dashboard page, and a
@@ -41,7 +96,7 @@ command. All three reach the render loop through the same control channel, the n
 **Tray icon.** A 3x5 grid of dots, green normally, grey while paused or locked, amber while an
 alert badge is waiting. Right-click for the menu: wake the board, pick a scene, pause/resume,
 brightness, open the dashboard, open the log, edit `config.local.toml`, recalibrate the bezel
-gap, restart, quit. Double-click opens the dashboard. `[ui] tray = false` turns it off.
+gap, restart, quit. A left click opens the dashboard. `[ui] tray = false` turns it off.
 
 **Dashboard.** `http://127.0.0.1:8770` (`[ui] dashboard_port`), loopback only, opened as its own
 window with Edge in app mode. It shows the deck as it looks now (the fifteen key images composed
