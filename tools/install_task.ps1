@@ -24,6 +24,21 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $python = Join-Path $root '.venv\Scripts\pythonw.exe'
 $launcher = Join-Path $root '.venv\Scripts\deckdashw.exe'   # from 'pip install -e .' (Phase 7a); pythonw -m deckdash until then
 
+function Get-HidapiDir {
+    # deck.hidapi_dir out of one TOML file, or $null when it holds no such key. A line grep,
+    # not a parser: the key appears once, under [deck], in both files. config.local.toml is the
+    # documented home for machine-local paths, so the caller consults it before config.toml.
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $null }
+    # -Last 1 matters: two matching lines make this an array, and the caller would then
+    # hand Join-Path an array of paths.
+    $line = Get-Content $Path | Where-Object { $_ -match '^\s*hidapi_dir\s*=' } | Select-Object -Last 1
+    if ($null -eq $line) { return $null }
+    if ($line -match '^\s*hidapi_dir\s*=\s*"([^"]*)"') { return $Matches[1] }
+    if ($line -match "^\s*hidapi_dir\s*=\s*'([^']*)'") { return $Matches[1] }   # TOML's other quote
+    return $null
+}
+
 function Stop-DeckDashProcesses {
     Get-CimInstance Win32_Process | Where-Object {
         # Only copies that own the Stream Deck. 'ctl' clients are short-lived, and a '--sim' run
@@ -72,14 +87,17 @@ if ($Remove) {
 # --- preflight -------------------------------------------------------------------------
 if (-not (Test-Path $python)) { throw "missing $python (create the venv first)" }
 if (Test-Path $launcher) { $exe = $launcher; $exeArgs = '' } else { $exe = $python; $exeArgs = '-m deckdash' }
-$cfg = Get-Content (Join-Path $root 'config.toml') | Where-Object { $_ -match '^\s*hidapi_dir\s*=' }
-$hidDir = ($cfg -replace '^\s*hidapi_dir\s*=\s*"([^"]*)".*$', '$1')
-if (-not $hidDir) { throw 'hidapi_dir not found in config.toml' }
+# The override first, then the tracked default: the repo's convention is that a machine-local
+# path lives in config.local.toml, and reading only config.toml made that convention fail here.
+$hidSrc = 'config.local.toml'
+$hidDir = Get-HidapiDir (Join-Path $root $hidSrc)
+if (-not $hidDir) { $hidSrc = 'config.toml'; $hidDir = Get-HidapiDir (Join-Path $root $hidSrc) }
+if (-not $hidDir) { throw 'hidapi_dir not found in config.local.toml or config.toml' }
 $dll = Join-Path $hidDir 'hidapi.dll'
 if (-not (Test-Path $dll)) {
-    throw "hidapi.dll not found at $dll as seen from this shell. If a sandboxed shell installed it, the copy may have been virtualized; place the real file there and rerun."
+    throw "hidapi.dll not found at $dll as seen from this shell (hidapi_dir came from $hidSrc). If a sandboxed shell installed it, the copy may have been virtualized; place the real file there and rerun."
 }
-Write-Host ("hidapi.dll : " + (Get-Item $dll).Length + " bytes at " + $dll)
+Write-Host ("hidapi.dll : " + (Get-Item $dll).Length + " bytes at " + $dll + " (from " + $hidSrc + ")")
 Write-Host ("launcher   : " + $exe + " " + $exeArgs)
 Write-Host ("workdir    : " + $root)
 
