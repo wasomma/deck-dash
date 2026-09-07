@@ -74,6 +74,7 @@ Status: **code done 2026-09-06** (previews in `sim/ambient-*.png`, all scenes un
 - [x] `tools/calibrate.py`: circle, diagonals and cross drawn across the whole canvas on the real deck; keys 0/4 = gap -1/+1, 5/9 = -4/+4, 14 saves `deck.gap_px` to `config.local.toml`, 10 quits. `install_task.ps1` gained `-Stop` / `-Start` so the device can be freed for it.
 - [x] Gap calibrated by Wes on 2026-09-06 with `tools\calibrate.py`: `deck.gap_px = 23` saved to `config.local.toml` in the main checkout (placeholder was 24). The scheduled task started afterwards, so the ticker and every scene use it. To recalibrate: `tools\install_task.ps1 -Stop`, run the tool, `-Start`.
 - [x] Wes saw the five scenes on the hardware on the evening of 2026-09-06 - that is what prompted the Phase 5 request for a sixth (side view, R34, rain, real glyph signs).
+- The `weather` scene described above is the 0.1.0 one, sky only. It was rebuilt on 2026-09-07 to put land under the sky; see "Ambient weather: ground under the sky" at the end of this file.
 
 ## Phase 4 — alerts and the interesting buttons
 Status: **code done 2026-09-06** (92 tests). Two gates for Wes (below).
@@ -302,7 +303,65 @@ thread dump on roughly two runs in three, and the suite still reports all green.
 changes - it reproduces with the 125 pre-existing tests and the new ones deselected - so a future
 session should not read it as a regression from them.
 
-Status at hand-off, 2026-09-07 15:10: **Phase 7 and everything offered after it are done, verified and live.** Phase 7 (the `deckdash` command, the named-pipe control channel, the tray, and the localhost dashboard in its Edge app-mode window) was verified on the deck, reviewed adversarially twice, and the sleep/wake reconnect path with it. Since then, five changes: `install_task.ps1` honours `hidapi_dir` from `config.local.toml`; `main()` starts the tray, the dashboard and the pipe before it waits for the deck, so a deck that never arrives is visible instead of silent, and `quit` reaches that wait; the README gained an "A second machine" section; the tracked `hidapi_dir` default became the generic `C:/Tools/hidapi`; and `[gpu] enabled` gave the last source without one an off switch. 129 tests pass. `origin/main` is at b48e0a8, the main checkout is level with it, and the task was restarted onto that build at 15:07 - all eleven sources ok, no warnings, and the ambient minutes either side of the day's restarts held 13.9 fps at target 14, flush avg 62 ms, 0 slow ticks. Every one of the five has been exercised on the hardware, including the two that only show up there: the waiting state (deck deliberately unavailable, 50 s dark) and the `hidapi_dir` lookup reading `(from config.local.toml)` for the first time.
+## Ambient weather: ground under the sky (0.3.0)
+
+Asked for on 2026-09-07 15:40 - "a more detailed background that has ground in the field of view",
+because with a clear sky the scene was a bare gradient and the whole bottom row was empty. Merged as
+PR #1 (`ab68a6b`), tagged **v0.3.0**, the repo's first tag, and live under the task from 19:07:55.
+
+- [x] **The land is silhouette masks, recoloured, not a second palette.** Two ridges receding into
+  haze, the hills, and the field, each a `L` mask built once in `_build_land` and pasted per frame
+  through a colour lerped from the ground colour toward `_haze(sky_bottom)` by how far away that band
+  is. So the landscape is lit by whatever the sky is doing - dawn, noon, dusk, storm - and there is no
+  second set of colours to keep in step with sunrise and sunset. `_haze` deliberately pulls a third of
+  the saturation out of the sky before hazing toward it: lerping at the raw sky turns the hills orange
+  at sunset, which reads as mud rather than as distance.
+- [x] **Trees and buildings get a mask of their own.** The treeline, a lone tree and a barn with a
+  silo first went into the band they stand on, which meant they were the same colour as it: they only
+  showed as a scalloped edge against the band behind, and under snow they vanished into white ground.
+  Painted darker than any band, they read in every condition. The same change let the snow caps drop
+  off the props - a 3 px white edge tracing every conifer read as line art - and stay on the smooth
+  terrain crests, where it reads as snow.
+- [x] **Geometry is placed off the key rows, not off the canvas.** The 24 px of bezel between the
+  middle and bottom rows is invisible, and the first pass put `horizon` at `0.68 * h`, which left the
+  entire treeline inside it: the trees were drawn, and simply could not be seen. The same trap
+  horizontally put the lone tree at `0.17 * w`, which is the gap between keys 10 and 11. The bands are
+  now derived from `KEY + self.gap`, ridges in the lower half of the middle row and everything with a
+  shape to it inside the bottom row, and landmarks sit on key centres.
+  `test_weather_scene_landmarks_avoid_the_bezel` asserts no prop ink falls in the horizontal bezel
+  band, that every bottom-row key has land detail, and that the barn window is inside one key.
+- [x] Sun and moon rise and set behind the ridges on a real arc whose ends sit under the horizon;
+  the moon is drawn at tonight's actual phase from the synodic month. Snow settles on the crests,
+  rain throws splashes on the field, fog lies on the land instead of hanging in mid-sky. A clear sky,
+  the case that prompted all this, also gets cirrus wisps, gliding birds and a rare shooting star.
+- [x] **Cost, and the one number that moved.** 4.1-5.5 ms per frame in the simulator against a 71 ms
+  budget at 14 fps, land build ~3 ms once per showing. On the deck, two clean minutes hand-run:
+  **13.9 fps at target 14, flush avg 42-43 ms, max 61 ms in the steady minute (99 ms in the first,
+  a startup outlier), 9.8-10.0 keys per frame, 0 slow ticks.** Before the rewrite the same scene ran
+  **flush avg 15-21 ms at 3.4-5.0 keys per frame**. The cause is the swaying grass: the blades are
+  spread across the full width, so all five bottom-row keys are dirty every frame where the bottom row
+  used to be static sky. Inside budget, with materially less headroom - if a future scene needs it
+  back, halve the sway rate or the blade count before touching anything else.
+- [x] Reviewed on the hardware by Wes, 2026-09-07 ("I like it"). The device was freed with
+  `install_task.ps1 -Stop` and a hand-run `pythonw -m deckdash --ambient weather` took it; note that
+  `-Start` alone does not recover from that, because the hand-run copy still holds the named mutex and
+  the task's process exits with "another deck-dash is already running" - it takes `-Stop` then
+  `-Start`.
+
+## Releases
+
+`CHANGELOG.md`, added with the above, gives deck-dash the scheme fpv-sim and fpv-sim-mcp already use,
+since it had none: [Keep a Changelog](https://keepachangelog.com/) plus semver, the version living in
+`deckdash/__init__.py` and read from there by `pyproject.toml`, the tag `vX.Y.Z` on the **merge
+commit**, and the GitHub release notes taken verbatim from that version's section. Before 1.0.0 the
+minor number carries features and the patch number carries fixes.
+
+`0.1.0` and `0.2.0` are reconstructed entries, written from the commits and from this file rather
+than from anything contemporaneous - the boundary itself is real (`f318eca`, Phase 7a, is the commit
+that bumped the version), but a reader should trust the commits over my summary of them. `0.3.0` is
+the work above and is the first release that was written as part of the change.
+
+Status at hand-off, 2026-09-07 19:10: **everything through Phase 7, the five fixes after it, and the 0.3.0 weather rewrite are done, verified and live.** Phase 7 (the `deckdash` command, the named-pipe control channel, the tray, and the localhost dashboard in its Edge app-mode window) was verified on the deck, reviewed adversarially twice, and the sleep/wake reconnect path with it. Then five fixes: `install_task.ps1` honours `hidapi_dir` from `config.local.toml`; `main()` starts the tray, the dashboard and the pipe before it waits for the deck, so a deck that never arrives is visible instead of silent, and `quit` reaches that wait; the README gained an "A second machine" section; the tracked `hidapi_dir` default became the generic `C:/Tools/hidapi`; and `[gpu] enabled` gave the last source without one an off switch. Each was exercised on the hardware, including the two that only show up there: the waiting state (deck deliberately unavailable, 50 s dark) and the `hidapi_dir` lookup reading `(from config.local.toml)` for the first time. Since then the ambient `weather` scene was rebuilt with land under the sky, reviewed on the deck by Wes, merged as PR #1 and tagged **v0.3.0** - the repo's first tag, and the point at which `CHANGELOG.md` gave the project a release scheme. 130 tests pass. `origin/main` is at ab68a6b, the main checkout is level with it, and the task was restarted onto that build at 19:07:55 (`deckdash 0.3.0 starting`), which is the copy holding the deck now.
 
 What is left is one thing, and it is first use rather than a defect: the README's second-machine section is unproven until someone walks it on the second PC. A prompt for that session was written on 2026-09-07 and covers the traps the README does not spell out - the Elgato software owning the device, the x64-versus-x86 DLL, `pip install -e .`, the task registration needing a non-sandboxed shell, and `ctl reload` before anything depends on a hand-edited `config.local.toml`. Also unconfirmed, deliberately: that the waiting tray icon is visibly grey - the API reported the value the icon is drawn from, but nobody looked at it.
 
