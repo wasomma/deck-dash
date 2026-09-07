@@ -34,5 +34,8 @@ deckdashw = "deckdash.main:main"
 [tool.setuptools]
 packages = ["deckdash", "deckdash.ambient", "deckdash.sources", "deckdash.tiles"]
 
+[tool.setuptools.package-data]
+deckdash = ["ui/*.html"]   # the dashboard page; the editable install finds it anyway, a wheel would not
+
 [tool.setuptools.dynamic]
 version = {attr = "deckdash.__version__"}

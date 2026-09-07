@@ -46,7 +46,10 @@ def build_slots(names: list[str], key_count: int, cfg: dict, sources: dict) -> l
         span = 1
         while span < tile.width and i + span < key_count and names[i + span] == name:
             span += 1
-        if span == 1 and name in overlays:
+        # An empty overlay value means "no overlay": config.local.toml merges into config.toml
+        # key by key, so blanking one is the only way to switch off an overlay set in the tracked
+        # file. It used to raise KeyError here, which also broke the next startup.
+        if span == 1 and overlays.get(name):
             tile = OverlayTile(cfg, sources, make_tile(overlays[name], cfg, sources), tile)
         tile.slot, tile.span = i, span
         slots.extend([tile] * span)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import tomllib
 from pathlib import Path
 
@@ -77,4 +78,15 @@ def write_local(update: dict, local: Path | str | None = None) -> None:
     for section, values in merged.items():
         if isinstance(values, dict):
             _emit_table(lines, section, values)
-    local.write_text("\n".join(lines), encoding="utf-8")
+    # Written through a temp file and read back before it replaces the real one. This file is read
+    # at every start, so a half-written or unparsable copy would leave the deck dark at the next
+    # logon; the dashboard's settings form is the first thing that puts typed text in here.
+    tmp = local.with_suffix(".tmp.toml")
+    tmp.write_text("\n".join(lines), encoding="utf-8")
+    try:
+        with open(tmp, "rb") as f:
+            tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        tmp.unlink(missing_ok=True)
+        raise ValueError(f"refusing to write unparsable {local.name}: {exc}") from exc
+    os.replace(tmp, local)

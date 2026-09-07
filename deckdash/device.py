@@ -46,6 +46,9 @@ class DeckBase:
     def __init__(self) -> None:
         self._pending: list[Image.Image | None] = [None] * self.key_count
         self._hash: list[int | None] = [None] * self.key_count
+        # What the deck is currently showing, so the dashboard can compose a preview. Only the
+        # simulator used to keep this; the hardware kept a crc32 per key and dropped the pixels.
+        self._shown: list[Image.Image | None] = [None] * self.key_count
         self._cursor = 0
         self._press_cb: PressCallback | None = None
         self.sent = 0  # key images actually transmitted (for tests and stats)
@@ -72,6 +75,8 @@ class DeckBase:
     def invalidate(self) -> None:
         """Forget what is on the deck so every pending image is resent (after a reconnect)."""
         self._hash = [None] * self.key_count
+        if len(self._shown) != self.key_count:  # a reconnect can report a different key count
+            self._shown = [None] * self.key_count
 
     def flush(self, budget_s: float) -> int:
         """Send changed keys, round-robin, until the time budget is spent. Returns keys sent."""
@@ -90,7 +95,8 @@ class DeckBase:
                 continue
             if self._send(i, img):
                 self._hash[i] = h
-                self._pending[i] = None
+                self._shown[i] = img  # no copy: a producer that mutated in place would already
+                self._pending[i] = None  # break the crc32 dirty check above, so these are fresh
                 sent += 1
             if time.perf_counter() - start > budget_s:
                 stopped_at = i
@@ -200,7 +206,6 @@ class SimDeck(DeckBase):
         self.out_dir = Path(out_dir)
         self.interval = interval
         self.scale = scale
-        self._shown: list[Image.Image | None] = [None] * self.key_count
         self._last_write = 0.0
         self.brightness = 80
         self.frames = 0
@@ -217,8 +222,7 @@ class SimDeck(DeckBase):
         self.brightness = percent
 
     def _send(self, idx: int, img: Image.Image) -> bool:
-        self._shown[idx] = img.copy()
-        return True
+        return True  # DeckBase.flush records the image in _shown, which write() composes
 
     def _after_flush(self) -> None:
         self._poll_press()

@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deck-dash</title>
+<style>
+  :root {
+    --bezel: #16161a; --bg: #101013; --panel: #1b1b21; --line: #2e2e38;
+    --ink: #e6e8ee; --dim: #808894; --green: #48d678; --amber: #ffb830; --red: #e0556a; --blue: #6fb4ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  h2 { font-size: 12px; margin: 0 0 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .8px; font-weight: 600; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  header .sub { color: var(--dim); font-size: 12px; }
+  header .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); box-shadow: 0 0 8px currentColor; }
+  main { display: grid; grid-template-columns: minmax(460px, 1fr) minmax(320px, 420px); gap: 16px; padding: 16px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+  .preview { background: var(--bezel); border-radius: 10px; padding: 12px; display: flex; justify-content: center; }
+  .preview img { width: 100%; max-width: 640px; image-rendering: pixelated; border-radius: 4px; display: block; }
+  .rows { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; }
+  .rows dt { color: var(--dim); }
+  .rows dd { margin: 0; }
+  .muted { color: var(--dim); }
+  .ok { color: var(--green); } .warn { color: var(--amber); } .bad { color: var(--red); }
+  button { font: inherit; color: var(--ink); background: #26262e; border: 1px solid var(--line); border-radius: 6px; padding: 6px 11px; cursor: pointer; }
+  button:hover { background: #30303a; border-color: #43434f; }
+  button:active { transform: translateY(1px); }
+  button.on { background: #24405c; border-color: #38618a; color: #cfe6ff; }
+  button.danger:hover { background: #4a2027; border-color: #7a3340; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .btns + .btns { margin-top: 8px; }
+  label { display: block; color: var(--dim); margin-bottom: 3px; font-size: 12px; }
+  input, select { font: inherit; color: var(--ink); background: #121217; border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; width: 100%; }
+  input:focus, select:focus { outline: none; border-color: #4a6f9e; }
+  input[type=color] { padding: 2px; height: 30px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .keys select { font-size: 12px; padding: 4px; }
+  .listrow { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+  .listrow input { flex: 1 1 auto; }
+  .listrow input.narrow { flex: 0 0 88px; }
+  .listrow input[type=color] { flex: 0 0 38px; }
+  .listrow button { flex: 0 0 auto; padding: 5px 9px; }
+  .scene { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .scene input[type=checkbox] { width: auto; }
+  .scene .name { flex: 1 1 auto; }
+  details { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+  details > summary { cursor: pointer; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .8px; font-weight: 600; margin-bottom: 10px; }
+  .save { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+  .note { font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 2px 0; vertical-align: top; }
+  td.k { color: var(--dim); padding-right: 12px; white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>deck-dash</h1>
+  <span class="sub" id="head">connecting...</span>
+  <span class="right"><span class="sub" id="conn"></span></span>
+</header>
+
+<main>
+  <div>
+    <div class="panel">
+      <h2>The deck</h2>
+      <div class="preview"><img id="frame" alt="the deck as it looks now"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Controls</h2>
+      <div class="btns" id="scene-btns"></div>
+      <div class="btns">
+        <button onclick="cmd('wake')">Wake board</button>
+        <button onclick="cmd('next')">Next scene</button>
+        <button id="pause-btn" onclick="togglePause()">Pause</button>
+        <button onclick="cmd('toast', ['test', 'dashboard', 'hello from the page'])">Test toast</button>
+      </div>
+      <div class="btns">
+        <span class="muted" style="align-self:center">Brightness</span>
+        <button onclick="cmd('brightness', ['auto'])">Auto</button>
+        <button onclick="cmd('brightness', ['100'])">100</button>
+        <button onclick="cmd('brightness', ['50'])">50</button>
+        <button onclick="cmd('brightness', ['30'])">30</button>
+        <button onclick="cmd('brightness', ['0'])">Off</button>
+      </div>
+      <div class="btns">
+        <button class="danger" onclick="confirmCmd('restart', 'Restart deck-dash? The deck goes dark for a few seconds.')">Restart</button>
+        <button class="danger" onclick="confirmCmd('quit', 'Quit deck-dash? The deck stays dark until the task starts it again.')">Quit</button>
+      </div>
+      <p class="note muted" id="cmd-note"></p>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Status</h2>
+      <table id="status"><tbody><tr><td class="muted">waiting...</td></tr></tbody></table>
+    </div>
+
+    <div class="panel">
+      <h2>Sources</h2>
+      <table id="sources"><tbody></tbody></table>
+    </div>
+  </div>
+</main>
+
+<main style="grid-template-columns: 1fr">
+  <div class="panel">
+    <h2>Settings</h2>
+    <p class="note muted">Saved to <code>config.local.toml</code> only; <code>config.toml</code> stays canonical.
+      Hosts, addresses and the calibrated gap are edited in the file by hand and are never touched here.
+      Saving rewrites that file, so comments in it are lost.</p>
+
+    <details open>
+      <summary>Layout</summary>
+      <div class="keys" id="keys"></div>
+      <p class="note muted">Row by row from the top left. A wide tile (news is 5 keys) must be listed on
+        consecutive keys. Blank leaves the key dark.</p>
+      <label style="margin-top:12px">Overlays &mdash; a tile that takes its key over while it has something to say</label>
+      <div id="overlays"></div>
+      <button onclick="addOverlay()">Add overlay</button>
+    </details>
+
+    <details open>
+      <summary>Ambient</summary>
+      <div class="grid3">
+        <div><label>Scene minutes</label><input type="number" id="scene_minutes" min="0" max="1440"></div>
+        <div><label>Ambient fps</label><input type="number" id="fps" min="1" max="30"></div>
+        <div><label>Idle minutes before a scene</label><input type="number" id="idle_minutes" min="0" max="1440"></div>
+      </div>
+      <label style="margin-top:12px">Rotation &mdash; tick to include, arrows to order</label>
+      <div id="scenes"></div>
+    </details>
+
+    <details open>
+      <summary>Brightness and the loop</summary>
+      <div class="grid3">
+        <div><label>Day brightness</label><input type="number" id="brightness" min="0" max="100"></div>
+        <div><label>Night brightness</label><input type="number" id="night_brightness" min="0" max="100"></div>
+        <div><label>Slow step (ms)</label><input type="number" id="slow_step_ms" min="1" max="10000"></div>
+        <div><label>Night starts</label><input type="text" id="night_start" placeholder="22:00"></div>
+        <div><label>Night ends</label><input type="text" id="night_end" placeholder="07:00"></div>
+      </div>
+    </details>
+
+    <details>
+      <summary>News feeds</summary>
+      <div id="feeds"></div>
+      <button onclick="addFeed()">Add feed</button>
+      <p class="note muted">A feed change needs a restart: the poller reads its list once, at start.</p>
+    </details>
+
+    <details>
+      <summary>CI repos</summary>
+      <div id="repos"></div>
+      <button onclick="addRepo()">Add repo</button>
+      <p class="note muted">A repo change needs a restart, for the same reason.</p>
+    </details>
+
+    <div class="save">
+      <button class="on" onclick="save()">Save and reload</button>
+      <button onclick="loadConfig()">Discard changes</button>
+      <span class="note" id="save-note"></span>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+var TILES = [], ALL_SCENES = [], CFG = null, LAST = null;
+
+function el(tag, attrs, kids) {
+  var e = document.createElement(tag);
+  for (var k in (attrs || {})) {
+    if (k === "class") e.className = attrs[k];
+    else if (k.slice(0, 2) === "on") e[k] = attrs[k];
+    else e.setAttribute(k, attrs[k]);
+  }
+  (kids || []).forEach(function (c) { e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+  return e;
+}
+function get(id) { return document.getElementById(id); }
+function post(path, body) {
+  return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); });
+}
+
+// --- the live preview: the server caches a frame for 200 ms, so 5 fps costs one compose each ---
+function tickFrame() { get("frame").src = "/api/frame.png?t=" + Date.now(); }
+
+// --- status -----------------------------------------------------------------------------------
+function dur(s) {
+  if (s === null || s === undefined) return "never";
+  s = Math.floor(s);
+  if (s < 60) return s + " s";
+  if (s < 3600) return Math.floor(s / 60) + " min";
+  return Math.floor(s / 3600) + " h " + ("0" + Math.floor(s % 3600 / 60)).slice(-2) + " min";
+}
+function row(k, v, cls) {
+  return el("tr", {}, [el("td", { class: "k" }, [k]), el("td", { class: cls || "" }, [v])]);
+}
+function tickStatus() {
+  fetch("/api/status").then(function (r) { return r.json(); }).then(function (s) {
+    get("conn").textContent = "";
+    if (!s.ok) { get("head").textContent = s.error || "not answering"; return; }
+    LAST = s;
+    var colors = { on: "var(--green)", off: "var(--dim)", badge: "var(--amber)" };
+    get("dot").style.color = get("dot").style.background = colors[s.tray_state] || "var(--dim)";
+    get("head").textContent = s.version + "  ·  " + s.mode + (s.scene ? " (" + s.scene + ")" : "")
+      + "  ·  up " + dur(s.uptime_s);
+    get("pause-btn").textContent = s.paused ? "Resume" : "Pause";
+    get("pause-btn").className = s.paused ? "on" : "";
+
+    var t = get("status").tBodies[0];
+    t.innerHTML = "";
+    t.appendChild(row("mode", s.mode + (s.scene ? " — " + s.scene : "")));
+    t.appendChild(row("brightness", s.brightness + (s.brightness_override === null ? " (auto)" : " (fixed)")));
+    t.appendChild(row("locked", s.locked ? "yes" : "no", s.locked ? "warn" : "muted"));
+    t.appendChild(row("last press", dur(s.idle_s) + " ago"));
+    t.appendChild(row("ticks", String(s.ticks)));
+    t.appendChild(row("slow ticks", String(s.slow_ticks), s.slow_ticks ? "warn" : "ok"));
+    t.appendChild(row("badges", (s.badges && s.badges.length) ? s.badges.join(", ") : "none"));
+    if (s.toast) t.appendChild(row("toast", s.toast, "warn"));
+    if (s.ambient) {
+      var a = s.ambient;
+      t.appendChild(row("last ambient minute", a.scene + " · " + a.fps.toFixed(1) + " fps of " + a.target));
+      t.appendChild(row("flush", "avg " + Math.round(a.flush_avg_ms) + " ms, max " + Math.round(a.flush_max_ms) + " ms",
+        a.flush_max_ms > 90 ? "warn" : "ok"));
+      t.appendChild(row("that minute", a.slow + " slow ticks, " + a.keys.toFixed(1) + " keys per frame", a.slow ? "warn" : "ok"));
+    } else {
+      t.appendChild(row("ambient", "no full minute measured yet", "muted"));
+    }
+    t.appendChild(row("deck", s.deck.type + (s.deck.serial ? " · " + s.deck.serial : "")));
+
+    var st = get("sources").tBodies[0];
+    st.innerHTML = "";
+    Object.keys(s.sources).sort().forEach(function (name) {
+      var src = s.sources[name], txt, cls;
+      if (src.error) { txt = "failing ×" + src.failures + ": " + src.error; cls = "bad"; }
+      else if (src.age_s === null) { txt = "no data yet"; cls = "muted"; }
+      else { txt = dur(src.age_s) + " ago"; cls = "ok"; }
+      st.appendChild(row(name, txt, cls));
+    });
+  }).catch(function () {
+    get("conn").textContent = "no connection";
+    get("dot").style.background = "var(--red)";
+  });
+}
+
+// --- commands ---------------------------------------------------------------------------------
+function note(id, text, cls) {
+  var e = get(id);
+  e.textContent = text;
+  e.className = "note " + (cls || "muted");
+}
+function cmd(name, args) {
+  return post("/api/cmd", { cmd: name, args: args || [] }).then(function (r) {
+    note("cmd-note", r.ok ? name + ": ok" : name + ": " + r.error, r.ok ? "ok" : "bad");
+    setTimeout(tickStatus, 120);
+    return r;
+  }).catch(function (e) { note("cmd-note", name + ": " + e, "bad"); });
+}
+function confirmCmd(name, question) { if (window.confirm(question)) cmd(name); }
+function togglePause() { cmd(LAST && LAST.paused ? "resume" : "pause"); }
+
+// --- settings ---------------------------------------------------------------------------------
+function tileSelect(value) {
+  var s = el("select", {});
+  s.appendChild(el("option", { value: "" }, ["—"]));
+  TILES.forEach(function (t) {
+    var o = el("option", { value: t }, [t]);
+    if (t === value) o.selected = true;
+    s.appendChild(o);
+  });
+  return s;
+}
+function overlayRow(base, top) {
+  var b = tileSelect(base), t = tileSelect(top);
+  var row = el("div", { class: "listrow" }, [b, el("span", { class: "muted" }, ["shown over"]), t,
+    el("button", { onclick: function () { row.remove(); } }, ["Remove"])]);
+  row.dataset.overlay = "1";
+  return row;
+}
+function addOverlay() { get("overlays").appendChild(overlayRow("", "")); }
+function feedRow(f) {
+  var name = el("input", { type: "text", class: "narrow", placeholder: "name", value: f.name || "" });
+  var url = el("input", { type: "text", placeholder: "https://...", value: f.url || "" });
+  var color = el("input", { type: "color", value: f.color || "#888888" });
+  var row = el("div", { class: "listrow" }, [name, url, color,
+    el("button", { onclick: function () { row.remove(); } }, ["Remove"])]);
+  row.dataset.feed = "1";
+  return row;
+}
+function addFeed() { get("feeds").appendChild(feedRow({})); }
+function repoRow(r) {
+  var repo = el("input", { type: "text", placeholder: "owner/name", value: r.repo || "" });
+  var label = el("input", { type: "text", class: "narrow", placeholder: "label", value: r.label || "" });
+  var row = el("div", { class: "listrow" }, [repo, label,
+    el("button", { onclick: function () { row.remove(); } }, ["Remove"])]);
+  row.dataset.repo = "1";
+  return row;
+}
+function addRepo() { get("repos").appendChild(repoRow({})); }
+
+function renderScenes(order) {
+  var box = get("scenes");
+  box.innerHTML = "";
+  var rest = ALL_SCENES.filter(function (s) { return order.indexOf(s) < 0; });
+  order.concat(rest).forEach(function (name) {
+    var on = order.indexOf(name) >= 0;
+    var cb = el("input", { type: "checkbox" });
+    cb.checked = on;
+    var r = el("div", { class: "scene" }, [cb, el("span", { class: "name" }, [name]),
+      el("button", { onclick: function () { move(r, -1); } }, ["↑"]),
+      el("button", { onclick: function () { move(r, 1); } }, ["↓"])]);
+    r.dataset.scene = name;
+    box.appendChild(r);
+  });
+}
+function move(row, delta) {
+  var box = row.parentNode, rows = Array.prototype.slice.call(box.children);
+  var i = rows.indexOf(row), j = i + delta;
+  if (j < 0 || j >= rows.length) return;
+  if (delta < 0) box.insertBefore(row, rows[j]); else box.insertBefore(rows[j], row);
+}
+
+function loadConfig() {
+  return fetch("/api/config").then(function (r) { return r.json(); }).then(function (r) {
+    if (!r.ok) { note("save-note", r.error || "could not read the config", "bad"); return; }
+    CFG = r.config;
+    TILES = CFG.tiles;
+    ALL_SCENES = CFG.all_scenes;
+
+    var keys = get("keys");
+    keys.innerHTML = "";
+    (CFG.layout.keys || []).forEach(function (name) { keys.appendChild(tileSelect(name)); });
+
+    var ov = get("overlays");
+    ov.innerHTML = "";
+    var overlays = CFG.layout.overlays || {};
+    Object.keys(overlays).forEach(function (base) {
+      if (overlays[base]) ov.appendChild(overlayRow(base, overlays[base]));
+    });
+
+    ["scene_minutes", "fps"].forEach(function (k) { get(k).value = CFG.ambient[k]; });
+    ["idle_minutes", "brightness", "night_brightness", "night_start", "night_end", "slow_step_ms"]
+      .forEach(function (k) { get(k).value = CFG.deck[k]; });
+    renderScenes(CFG.ambient.scenes || []);
+
+    var feeds = get("feeds");
+    feeds.innerHTML = "";
+    ((CFG.news || {}).feeds || []).forEach(function (f) { feeds.appendChild(feedRow(f)); });
+    var repos = get("repos");
+    repos.innerHTML = "";
+    ((CFG.ci || {}).repos || []).forEach(function (r2) { repos.appendChild(repoRow(r2)); });
+
+    renderSceneButtons();
+    note("save-note", "");
+  });
+}
+
+function renderSceneButtons() {
+  var box = get("scene-btns");
+  box.innerHTML = "";
+  ALL_SCENES.forEach(function (name) {
+    box.appendChild(el("button", { onclick: function () { cmd("scene", [name]); } }, [name]));
+  });
+}
+
+function collect() {
+  var keys = Array.prototype.map.call(get("keys").children, function (s) { return s.value; });
+  var overlays = {};
+  // Every overlay in the effective config is sent, blanked ones as "": config.local.toml merges
+  // key by key into config.toml, so a removed one has to be written as empty to stay removed.
+  Object.keys((CFG.layout || {}).overlays || {}).forEach(function (b) { overlays[b] = ""; });
+  Array.prototype.forEach.call(get("overlays").children, function (row) {
+    var sel = row.getElementsByTagName("select");
+    if (sel[0].value) overlays[sel[0].value] = sel[1].value;
+  });
+  var scenes = [];
+  Array.prototype.forEach.call(get("scenes").children, function (row) {
+    if (row.getElementsByTagName("input")[0].checked) scenes.push(row.dataset.scene);
+  });
+  var feeds = Array.prototype.map.call(get("feeds").children, function (row) {
+    var i = row.getElementsByTagName("input");
+    return { name: i[0].value, url: i[1].value, color: i[2].value };
+  });
+  var repos = Array.prototype.map.call(get("repos").children, function (row) {
+    var i = row.getElementsByTagName("input");
+    return { repo: i[0].value, label: i[1].value };
+  });
+  var num = function (id) { return Number(get(id).value); };
+  return {
+    layout: { keys: keys, overlays: overlays },
+    ambient: { scenes: scenes, scene_minutes: num("scene_minutes"), fps: num("fps") },
+    deck: {
+      idle_minutes: num("idle_minutes"), brightness: num("brightness"),
+      night_brightness: num("night_brightness"), slow_step_ms: num("slow_step_ms"),
+      night_start: get("night_start").value, night_end: get("night_end").value
+    },
+    news: { feeds: feeds }, ci: { repos: repos }
+  };
+}
+
+function save() {
+  note("save-note", "saving...", "muted");
+  post("/api/config", collect()).then(function (r) {
+    if (!r.ok) { note("save-note", r.error, "bad"); return; }
+    note("save-note", r.restart_required
+      ? "saved and reloaded — the feed or repo change needs a restart to take effect"
+      : "saved and reloaded", r.restart_required ? "warn" : "ok");
+    loadConfig();
+    tickStatus();
+  }).catch(function (e) { note("save-note", String(e), "bad"); });
+}
+
+loadConfig();
+tickStatus();
+tickFrame();
+setInterval(tickFrame, 200);
+setInterval(tickStatus, 1000);
+</script>
+</body>
+</html>

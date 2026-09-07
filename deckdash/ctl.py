@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tomllib
 
-from . import config
-from .control import COMMANDS, DEFAULT_PIPE, restart_script, run_powershell, send
+from . import config, dashboard
+from .control import COMMANDS, DEFAULT_PIPE, open_window, restart_script, run_powershell, send
 
 HELP = {
     "status": "mode, scene, brightness, slow ticks, every source's age and error",
@@ -73,11 +74,16 @@ def format_status(s: dict) -> str:
     return "\n".join(lines)
 
 
-def _configured_pipe() -> str:
+def _cfg() -> dict:
+    """The config as the running copy would read it; a broken file must not stop ``ctl``."""
     try:
-        return str(config.load().get("ui", {}).get("pipe", DEFAULT_PIPE))
-    except (OSError, ValueError):
-        return DEFAULT_PIPE
+        return config.load()
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def _configured_pipe() -> str:
+    return str(_cfg().get("ui", {}).get("pipe", DEFAULT_PIPE))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,8 +94,9 @@ def main(argv: list[str] | None = None) -> int:
         print("restart requested" + (f" (powershell pid {pid})" if pid else "; not on Windows, nothing done"))
         return 0 if pid else 1
     if args.command == "open":
-        print("the dashboard arrives in Phase 7b", file=sys.stderr)
-        return 1
+        url = dashboard.url_for(_cfg())
+        print(f"opening {url} ({open_window(url)})")
+        return 0
     reply = send(args.command, args.args, pipe=pipe)
     if args.json:
         print(json.dumps(reply, indent=2, sort_keys=True))

@@ -15,8 +15,11 @@ software is not needed and must not be running.
 4. Run: `.venv\Scripts\python -m deckdash`
 5. Run at logon (per-user Task Scheduler entry, restarts on failure, no admin needed), from
    your own terminal: `powershell -ExecutionPolicy Bypass -File tools\install_task.ps1`
-   (`-Status` to inspect, `-Stop` and `-Start` to free the deck for a tool and take it back, `-Remove` to unregister). The task runs `pythonw.exe`, so all
-   output goes to `logs\deckdash.log`. A second copy started by hand exits immediately.
+   (`-Status` to inspect, `-Stop` and `-Start` to free the deck for a tool and take it back, `-Remove` to unregister). The task runs without a console, so all
+   output goes to `logs\deckdash.log`.
+6. Optional, and what the task prefers once it is there: `.venv\Scripts\python -m pip install -e .`
+   from the checkout, which puts `deckdash` and `deckdashw` on the venv's `Scripts`. Re-run
+   `install_task.ps1` afterwards so the task launches `deckdashw.exe`.
 
 At start the app raises itself to normal CPU class and memory priority and opts out of Windows
 power throttling (a windowless task-launched process gets efficiency QoS otherwise, which
@@ -28,6 +31,42 @@ No hardware handy: `.venv\Scripts\python -m deckdash --sim --seconds 15` writes
 `sim/canvas.png` every second; write a key index to `sim/press.txt` to simulate a press.
 `.venv\Scripts\python tools\preview.py` renders the board and every zoom view with live
 data into `sim/board.png` and `sim/zoom-*.png`.
+
+## Using it
+
+One process owns the deck and shows three other faces: a tray icon, a dashboard page, and a
+command. All three reach the render loop through the same control channel, the named pipe
+`\\.\pipe\deckdash`, so every deck write stays on the one thread.
+
+**Tray icon.** A 3x5 grid of dots, green normally, grey while paused or locked, amber while an
+alert badge is waiting. Right-click for the menu: wake the board, pick a scene, pause/resume,
+brightness, open the dashboard, open the log, edit `config.local.toml`, recalibrate the bezel
+gap, restart, quit. Double-click opens the dashboard. `[ui] tray = false` turns it off.
+
+**Dashboard.** `http://127.0.0.1:8770` (`[ui] dashboard_port`), loopback only, opened as its own
+window with Edge in app mode. It shows the deck as it looks now (the fifteen key images composed
+with the calibrated gap, refreshed five times a second), the status the `status` command reports,
+every source's age and last error, buttons for the same things the tray offers, and a settings
+form for the layout, the overlays, the scene rotation, the brightness schedule and the news and CI
+lists. Saves go to `config.local.toml` only, so `config.toml` stays canonical, and the page says
+when a change needs a restart rather than a reload (the news and CI pollers read their lists once,
+at start). Hosts and addresses are not shown and never written. Open it with the tray, with
+`deckdash ctl open`, or by launching deck-dash again while a copy is running.
+
+**Command.** `deckdash ctl <command>` talks to the running copy:
+
+    deckdash ctl status                  # mode, scene, fps, slow ticks, every source's age
+    deckdash ctl scene tokyo             # or wake, next, pause, resume
+    deckdash ctl brightness 50           # a fixed level, or `auto` for the day/night schedule
+    deckdash ctl toast test hello "..."  # a test toast through the real alert path
+    deckdash ctl reload                  # re-read the config: layout, scenes, brightness, idle
+    deckdash ctl open                    # the dashboard window
+    deckdash ctl restart                 # install_task.ps1 -Stop then -Start
+    deckdash ctl quit
+
+`--json` prints the raw reply. Without the editable install the same thing is
+`python -m deckdash ctl ...`. The simulator answers on its own pipe (`--pipe deckdash-sim`) and
+its own port, one above the configured one, so it can run beside the live copy.
 
 ## Layout
 

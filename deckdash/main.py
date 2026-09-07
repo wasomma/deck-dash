@@ -8,9 +8,10 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, config
+from . import __version__, config, dashboard
 from .app import App
-from .control import DEFAULT_PIPE, SIM_PIPE, ControlServer, pipe_address
+from .control import DEFAULT_PIPE, SIM_PIPE, ControlServer, open_window, pipe_address
+from .dashboard import Dashboard
 from .device import RealDeck, SimDeck
 from .tray import Tray
 
@@ -155,8 +156,11 @@ def main(argv: list[str] | None = None) -> int:
 
     setup_logging(args.verbose)
     if not args.sim and not single_instance():
-        log.error("another deck-dash is already running (scheduled task?); exiting")
-        return 3
+        # Launching deck-dash again is how you ask for its window, the way clicking a running
+        # app's icon does; the copy that owns the deck keeps it.
+        log.info("another deck-dash is already running; opening its dashboard")
+        open_window(dashboard.url_for(config.load(args.config)))
+        return 0
     def load_cfg() -> dict:  # also the `reload` command's loader, so the overrides survive a reload
         cfg = config.load(args.config)
         dk = cfg.setdefault("deck", {})
@@ -181,7 +185,12 @@ def main(argv: list[str] | None = None) -> int:
     ui = cfg.get("ui", {})
     control = ControlServer(app, pipe_address(SIM_PIPE if args.sim else str(ui.get("pipe", DEFAULT_PIPE))))
     control.start()
-    tray = Tray(app, ROOT) if bool(ui.get("tray", True)) and not args.sim else None
+    # The simulator takes the next port up, as it takes its own pipe, so it can run beside the
+    # live copy; a port already bound is a warning, never a reason not to light the deck.
+    board = Dashboard(app, dashboard.port_for(cfg) + (1 if args.sim else 0))
+    board.start()
+    board.ready.wait(5)
+    tray = Tray(app, ROOT, board.url) if bool(ui.get("tray", True)) and not args.sim else None
     if tray is not None:
         tray.start()
     try:
@@ -189,5 +198,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if tray is not None:
             tray.stop()
+        board.stop()
         control.stop()
     return 0
