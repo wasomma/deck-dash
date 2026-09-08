@@ -23,7 +23,8 @@ from deckdash.sources.bsod import merge_crashes, parse_events, summarize  # noqa
 from deckdash.sources.ci import normalize_repos, summarize_repo  # noqa: E402
 from deckdash.sources.claude import ClaudePoller, apply_event, project_name  # noqa: E402
 from deckdash.sources.claude import summarize as summarize_sessions  # noqa: E402
-from deckdash.sources.claude_limits import parse_usage, read_token  # noqa: E402
+from deckdash.sources import claude_limits  # noqa: E402
+from deckdash.sources.claude_limits import parse_usage, read_token, refresh_token  # noqa: E402
 from deckdash.sources.claude_usage import merge, read_snapshot, read_transcript  # noqa: E402
 from deckdash.sources.media import is_active, parse_line  # noqa: E402
 from deckdash.sources.news import interleave, parse_feed  # noqa: E402
@@ -692,6 +693,53 @@ def test_plan_limits_parse_from_the_wire_format():
 
     assert parse_usage({"rate_limits_available": False})["why"].startswith("plan limits unavailable")
     assert parse_usage({})["buckets"] == []
+
+
+def test_token_refresh_rotates_and_preserves_the_rest_of_the_file(tmp_path, monkeypatch):
+    """The refresh token rotates, so the reply has to be persisted or the old one is dead and
+    the CLI is logged out. Everything else in the file has to survive that write."""
+    import io
+    now = 1788830000.0
+    path = tmp_path / ".credentials.json"
+    path.write_text(json.dumps({
+        "mcpOAuth": {"miro|abc": {"accessToken": "keep-me"}},
+        "claudeAiOauth": {"accessToken": "old-access", "refreshToken": "old-refresh",
+                          "expiresAt": int((now + 60) * 1000), "scopes": ["user:inference", "user:profile"]},
+    }), encoding='utf-8')
+
+    # still valid, but inside the margin: due for a refresh rather than an error
+    assert read_token(path, now, margin=0)[0] == "old-access"
+    assert read_token(path, now, margin=900)[1] == claude_limits.STALE
+
+    reply = json.dumps({"access_token": "new-access", "refresh_token": "new-refresh",
+                        "expires_in": 28800, "scope": "user:inference user:profile"}).encode()
+    monkeypatch.setattr(claude_limits.urllib.request, 'urlopen',
+                        lambda req, timeout=None: io.BytesIO(reply).__enter__() or io.BytesIO(reply))
+    tok, why = refresh_token(path, now)
+    assert tok == "new-access" and why == ""
+
+    saved = json.loads(path.read_text(encoding='utf-8'))
+    assert saved["mcpOAuth"]["miro|abc"]["accessToken"] == "keep-me"  # untouched
+    oauth = saved["claudeAiOauth"]
+    assert oauth["accessToken"] == "new-access" and oauth["refreshToken"] == "new-refresh"
+    assert oauth["expiresAt"] == int((now + 28800) * 1000)
+    assert read_token(path, now, margin=900)[0] == "new-access"  # no longer stale
+
+
+def test_token_refresh_leaves_the_file_alone_when_it_is_rejected(tmp_path, monkeypatch):
+    """A rejected refresh must not damage a credential file that another client may still use."""
+    now = 1788830000.0
+    path = tmp_path / ".credentials.json"
+    original = json.dumps({"claudeAiOauth": {"accessToken": "a", "refreshToken": "r",
+                                             "expiresAt": 1, "scopes": ["user:profile"]}})
+    path.write_text(original, encoding='utf-8')
+
+    def boom(req, timeout=None):
+        raise claude_limits.urllib.error.HTTPError(req.full_url, 400, 'Bad Request', {}, None)
+    monkeypatch.setattr(claude_limits.urllib.request, 'urlopen', boom)
+    tok, why = refresh_token(path, now)
+    assert tok is None and "claude auth login" in why
+    assert path.read_text(encoding='utf-8') == original
 
 
 def test_usage_key_reports_the_worst_of_several_live_sessions():

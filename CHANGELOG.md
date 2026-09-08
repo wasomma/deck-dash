@@ -43,6 +43,13 @@ The version itself lives in `deckdash/__init__.py`; `pyproject.toml` reads it fr
   a 0-1 fraction. Needs `claude auth login`;
   `claude setup-token` cannot work, since those sessions lack the `user:profile` scope the
   endpoint requires. The credential file is read, never written.
+- **deck-dash refreshes the access token itself**, a quarter of an hour before expiry and again
+  if a request comes back rejected. The token lasts about eight hours and the CLI only renews it
+  when the CLI is used, which on a Desktop-only machine is never, so the limit bars would have
+  gone dark every night. This is the one place the credential file is written: the refresh token
+  rotates, so the reply must be persisted or the old one is dead and the CLI is signed out. Other
+  keys in the file are preserved, the write is atomic and re-read before it replaces anything,
+  and a rejected refresh leaves the file exactly as it was.
 - The key sizes its rows to however many windows the plan has rather than assuming three, so a
   per-model bar appears without crowding the others off a 72 px key.
 

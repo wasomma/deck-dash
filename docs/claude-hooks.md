@@ -140,6 +140,13 @@ request is not made at all and the tile says `claude auth login`.
 > poll_minutes` defaults to 5, and a 429 is honoured to the second rather than retried. Set
 > `enabled = false` to switch the poller off entirely.
 
-The access token lasts about eight hours. The CLI refreshes it whenever you use it; if you only
-work in the Desktop app, expect to run `claude auth login` again roughly daily, and the limit bars
-to dash out until you do.
+The access token lasts about eight hours, and the CLI only refreshes it when the CLI is used -
+which, working in the Desktop app, is never. So deck-dash refreshes it itself, a quarter of an
+hour before expiry and again if a request is rejected.
+
+That is the one place deck-dash **writes** the credential file, and it has to: the refresh token
+rotates, so a reply that is not persisted leaves the old one dead and the CLI signed out. The
+write preserves every other key in the file (your `mcpOAuth` block), goes through a temp file
+that is re-read before `os.replace`, and re-reads the credentials first so a refresh the CLI just
+did is used rather than overwritten. A rejected refresh leaves the file untouched and the tile
+says `claude auth login`.
