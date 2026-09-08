@@ -178,30 +178,32 @@ class AlertWatcher:
         return out
 
     def _check_claude_usage(self) -> list[Alert]:
-        """One toast per limit as it crosses alert_pct, and one when it drops back under."""
-        src = self._src("claude_usage")
+        """One toast per limit as it crosses alert_pct, and one when it drops back under.
+
+        Reads the windows from claude_limits, which is where they live now: the statusLine
+        snapshot this used to read is never written on a Desktop-only machine."""
+        src = self._src("claude_limits")
         limit = float(self.cfg.get("claude_usage", {}).get("alert_pct", 90))
         if src is None or limit <= 0:
             return []
-        st = src.state
-        if not st.get("statusline", False):
-            return []
         out = []
-        for key, label in (("five_pct", "5-HOUR"), ("week_pct", "WEEKLY")):
-            pct = st.get(key)
-            if pct is None:
+        for b in src.state.get("buckets") or []:
+            pct, key = b.get("pct"), b.get("key")
+            if pct is None or not key:
                 continue
-            over = pct >= limit
+            over = pct >= limit or bool(b.get("critical"))
             was = self.usage_over.get(key)
             self.usage_over[key] = over
             if was is None or over == was:
                 continue
+            label = str(b.get("label") or key)
             if over:
-                out.append(Alert("CLAUDE", label, f"{pct:.0f}% used", "usage limit", AMBER if pct < 100 else RED, "usage"))
+                out.append(Alert("CLAUDE", label, f"{pct:.0f}% used", "usage limit",
+                                 RED if pct >= 100 else AMBER, "usage"))
             else:
-                out.append(Alert("CLAUDE", label, f"{pct:.0f}% used", "back under the line", GREEN, "usage", "good"))
+                out.append(Alert("CLAUDE", label, f"{pct:.0f}% used", "back under the line",
+                                 GREEN, "usage", "good"))
         return out
-
 
 # --- rendering -------------------------------------------------------------------------
 

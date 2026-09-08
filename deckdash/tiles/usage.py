@@ -80,7 +80,9 @@ class UsageTile(Tile):
         known = [m["pct"] for m in meters if m["pct"] is not None]
         if known and not stale:
             worst = max(known)
-            text(d, (68, 8), f"{worst:.0f}%", 13, heat(worst / 100), anchor="rm")
+            shown = f"{worst:.0f}%"
+            # 100% is a digit wider than any other reading and would touch the CLAUDE label.
+            text(d, (68, 8), shown, fit_size(shown, 28, 13), heat(worst / 100), anchor="rm")
 
         # Label and percentage on one line, the bar full width underneath: at arm's length the
         # bar length is what reads, so it gets the whole key rather than the gap between two texts.

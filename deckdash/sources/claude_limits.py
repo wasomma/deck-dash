@@ -2,9 +2,12 @@
 
 The Desktop app never runs a statusLine command, so the limits have no local file to be read out
 of (see ``claude_usage``). ``GET /api/oauth/usage`` is where Claude Code itself gets them, and it
-is the only source that also carries the **per-model** weekly windows - ``model_scoped`` entries
-whose ``display_name`` the server supplies, so the Fable bar is labelled by the server rather than
-guessed here.
+is the only source that also carries the **per-model** weekly windows. They arrive in a
+self-describing ``limits`` array - ``kind``, ``percent``, and for a scoped window the model whose
+``display_name`` the server supplies - so the Fable bar is labelled by the plan, not guessed here.
+
+Note the units: on the wire ``utilization`` is already a percentage (8.0, 72.0). In the response
+*headers* the same word means a 0-1 fraction, which is why Claude Code multiplies those by 100.
 
 Two things this client must be careful about:
 
@@ -56,31 +59,70 @@ def _resets(v) -> float:
 
 
 def _entry(d, key: str, label: str) -> dict | None:
-    """One window. ``utilization`` is a 0-1 fraction; the tile wants a percentage."""
+    """One window from a named top-level field.
+
+    ``utilization`` here is already a percentage (the wire format returns 8.0 and 72.0, not 0.08
+    and 0.72) - unlike the response *headers*, where it is a fraction and Claude Code multiplies
+    by 100. Getting that backwards would have put 7200% on the key.
+    """
     if not isinstance(d, dict):
         return None
     u = _num(d.get("utilization"))
     if u is None:
         return None
-    return {"key": key, "label": label, "pct": u * 100.0, "resets_at": _resets(d.get("resets_at"))}
+    return {"key": key, "label": label, "pct": u, "resets_at": _resets(d.get("resets_at")),
+            "critical": False, "active": False}
+
+
+KIND_LABEL = {"session": "5H", "weekly_all": "WK"}
+
+
+def _from_limits(rows: list) -> list[dict]:
+    """The ``limits[]`` array, which describes itself: kind, percent, and the model a scoped
+    window belongs to. Preferred over the named fields because the per-model window arrives here
+    with the server's own display_name and there is nothing to guess."""
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        pct = _num(r.get("percent"))
+        if pct is None:
+            continue
+        kind = str(r.get("kind") or "")
+        model = ((r.get("scope") or {}).get("model") or {}).get("display_name") if isinstance(r.get("scope"), dict) else None
+        label = KIND_LABEL.get(kind) or (str(model).upper()[:5] if model else kind.upper()[:5] or "LIMIT")
+        out.append({
+            "key": f"model:{str(model).lower()}" if model else kind,
+            "label": label,
+            "pct": pct,
+            "resets_at": _resets(r.get("resets_at")),
+            "critical": str(r.get("severity") or "") == "critical",
+            "active": bool(r.get("is_active")),
+        })
+    return out
 
 
 def parse_usage(payload: dict) -> dict:
-    """The endpoint's reply as a list of windows, or an explanation of why there are none."""
+    """The endpoint's reply as a list of windows, or an explanation of why there are none.
+
+    The wire format puts the windows at the top level and repeats them in a self-describing
+    ``limits`` array; Claude Code's own normalized shape nests them under ``rate_limits``. Both
+    are accepted, ``limits`` first, so a change on either side degrades rather than breaks.
+    """
     if not isinstance(payload, dict):
         return {"buckets": [], "why": "unreadable reply"}
     if payload.get("rate_limits_available") is False:
-        # The endpoint says this explicitly for API-key, Bedrock and Vertex sessions, and for a
-        # token minted without user:profile - which is what `claude setup-token` produces.
+        # Explicit for API-key, Bedrock and Vertex sessions, and for a token minted without
+        # user:profile - which is what `claude setup-token` produces.
         return {"buckets": [], "why": "plan limits unavailable for this token"}
-    limits = payload.get("rate_limits")
-    if not isinstance(limits, dict):
-        return {"buckets": [], "why": "no rate_limits in the reply"}
 
+    if isinstance(payload.get("limits"), list):
+        buckets = _from_limits(payload["limits"])
+        if buckets:
+            return {"buckets": buckets, "why": ""}
+
+    limits = payload.get("rate_limits") if isinstance(payload.get("rate_limits"), dict) else payload
     buckets = [b for b in (_entry(limits.get(k), k, label) for k, label in FIXED) if b]
-
-    # Per-model weeklies: prefer `model_scoped`, whose display_name the server supplies, so the
-    # label is whatever the plan actually calls that bucket rather than a guess made here.
     scoped = limits.get("model_scoped")
     if isinstance(scoped, list):
         for m in scoped:
@@ -89,8 +131,6 @@ def parse_usage(payload: dict) -> dict:
             if b:
                 buckets.append(b)
     if not any(b["key"].startswith("model:") for b in buckets):
-        # `model_scoped` is documented as additive and "present only when the server emits them",
-        # so fall back to the named per-model fields rather than showing nothing.
         for key, label in (("seven_day_opus", "OPUS"), ("seven_day_sonnet", "SONNET")):
             b = _entry(limits.get(key), f"model:{label.lower()}", label[:5])
             if b:

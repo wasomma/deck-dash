@@ -674,6 +674,26 @@ def test_usage_falls_back_to_the_transcript_when_no_statusline_ran(tmp_path):
     assert st["limits_age"] is None  # nothing has ever supplied the limits
 
 
+def test_plan_limits_parse_from_the_wire_format():
+    """The endpoint returns percentages, not fractions, and describes its windows in limits[].
+    Reading utilization as a 0-1 fraction (which is what the response *headers* carry) would have
+    put 7200% on the key."""
+    got = parse_usage(json.loads((FIX / "oauth_usage.json").read_text()))["buckets"]
+    assert [(b["label"], b["pct"]) for b in got] == [("5H", 8), ("WK", 72), ("FABLE", 100)]
+    fable = got[-1]
+    assert fable["critical"] and fable["active"] and fable["key"] == "model:fable"
+    assert fable["resets_at"] > 1_788_000_000  # the ISO string became an epoch
+
+    # Claude Code's own normalized shape nests the windows and uses model_scoped; still accepted.
+    nested = {"rate_limits": {"five_hour": {"utilization": 12.0, "resets_at": 1788840000},
+                             "model_scoped": [{"display_name": "Fable", "utilization": 50.0,
+                                               "resets_at": 1789200000}]}}
+    assert [(b["label"], b["pct"]) for b in parse_usage(nested)["buckets"]] == [("5H", 12.0), ("FABLE", 50.0)]
+
+    assert parse_usage({"rate_limits_available": False})["why"].startswith("plan limits unavailable")
+    assert parse_usage({})["buckets"] == []
+
+
 def test_usage_key_reports_the_worst_of_several_live_sessions():
     """Wes runs several sessions at once. Picking the most recently written transcript made the
     bar flip between them with nothing to say which one it meant; the key takes the worst and

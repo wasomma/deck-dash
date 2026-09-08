@@ -37,7 +37,10 @@ The version itself lives in `deckdash/__init__.py`; `pyproject.toml` reads it fr
 
 - The **limit windows come from `GET /api/oauth/usage`**, the endpoint `/usage` itself reads, and
   with them the **per-model weekly** - `model_scoped` entries the server labels itself, so the
-  Fable bar is named by the plan rather than guessed. Needs `claude auth login`;
+  Fable bar is named by the plan rather than guessed. The windows arrive in a self-describing
+  `limits` array (`kind`, `percent`, and the scoped model's `display_name`); on the wire
+  `utilization` is already a percentage, unlike the response headers where the same word means
+  a 0-1 fraction. Needs `claude auth login`;
   `claude setup-token` cannot work, since those sessions lack the `user:profile` scope the
   endpoint requires. The credential file is read, never written.
 - The key sizes its rows to however many windows the plan has rather than assuming three, so a
