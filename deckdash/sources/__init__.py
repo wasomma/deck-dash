@@ -7,6 +7,7 @@ from .bitaxe import BitaxePoller
 from .bsod import BsodPoller
 from .ci import GhPoller
 from .claude import ClaudePoller
+from .claude_usage import ClaudeUsagePoller
 from .gpu import GpuPoller
 from .media import MediaSource
 from .news import NewsPoller
@@ -27,6 +28,7 @@ SOURCE_CLASSES = {
     "bsod": BsodPoller,
     "news": NewsPoller,
     "claude": ClaudePoller,
+    "claude_usage": ClaudeUsagePoller,
     "media": MediaSource,
 }
 

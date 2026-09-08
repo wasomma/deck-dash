@@ -1,0 +1,23 @@
+{
+  "hook_event_name": "Status",
+  "session_id": "ef586f68-f56a-47b6-8967-d5ecf8efbfb3",
+  "transcript_path": "/c/Users/WesF/.claude/projects/deck-dash/ef586f68.jsonl",
+  "cwd": "C:/Users/WesF/Desktop/Dev/Projects/deck-dash",
+  "version": "2.1.260",
+  "model": { "id": "claude-opus-5", "display_name": "Opus 5" },
+  "workspace": { "current_dir": "C:/Users/WesF/Desktop/Dev/Projects/deck-dash", "project_dir": "C:/Users/WesF/Desktop/Dev/Projects/deck-dash" },
+  "output_style": { "name": "default" },
+  "cost": { "total_cost_usd": 1.42, "total_duration_ms": 812000, "total_api_duration_ms": 402000, "total_lines_added": 210, "total_lines_removed": 18 },
+  "context_window": {
+    "total_input_tokens": 83251,
+    "total_output_tokens": 1181,
+    "context_window_size": 200000,
+    "used_percentage": 42.2,
+    "remaining_percentage": 57.8
+  },
+  "exceeds_200k_tokens": false,
+  "rate_limits": {
+    "five_hour": { "used_percentage": 12.4, "resets_at": 1788840000 },
+    "seven_day": { "used_percentage": 63.0, "resets_at": 1789200000 }
+  }
+}

@@ -45,6 +45,15 @@ class BsodTile(Tile):
     refresh = 5.0
     zoom_refresh = 5.0
 
+    def __init__(self, cfg, sources):
+        super().__init__(cfg, sources)
+        self.overlay_s = float(cfg.get("bsod", {}).get("overlay_hours", 48)) * 3600
+
+    def active(self, now: float) -> bool:
+        """Overlay its key only while a crash is recent: a clean month should show the base tile."""
+        since = self.sources["bsod"].state.get("since_last")
+        return since is not None and since < self.overlay_s
+
     def render(self, now):
         src = self.sources["bsod"]
         s = src.state

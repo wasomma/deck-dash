@@ -51,6 +51,7 @@ class AlertWatcher:
         self.vps_prev: dict[str, str] = {}
         self.bitaxe_online: bool | None = None
         self.claude_seen: dict[str, float] = {}
+        self.usage_over: dict[str, bool] = {}
 
     def _save(self) -> None:
         if not self.state_path:
@@ -73,6 +74,7 @@ class AlertWatcher:
         out += self._check_vps()
         out += self._check_bsod(now)
         out += self._check_claude()
+        out += self._check_claude_usage()
         return out
 
     def _check_ci(self) -> list[Alert]:
@@ -173,6 +175,31 @@ class AlertWatcher:
             if s["since"] > self.claude_seen.get(s["id"], 0.0):
                 self.claude_seen[s["id"]] = s["since"]
                 out.append(Alert("CLAUDE", "NEEDS YOU", s["project"], s.get("message", ""), PURPLE, "claude"))
+        return out
+
+    def _check_claude_usage(self) -> list[Alert]:
+        """One toast per limit as it crosses alert_pct, and one when it drops back under."""
+        src = self._src("claude_usage")
+        limit = float(self.cfg.get("claude_usage", {}).get("alert_pct", 90))
+        if src is None or limit <= 0:
+            return []
+        st = src.state
+        if not st.get("statusline", False):
+            return []
+        out = []
+        for key, label in (("five_pct", "5-HOUR"), ("week_pct", "WEEKLY")):
+            pct = st.get(key)
+            if pct is None:
+                continue
+            over = pct >= limit
+            was = self.usage_over.get(key)
+            self.usage_over[key] = over
+            if was is None or over == was:
+                continue
+            if over:
+                out.append(Alert("CLAUDE", label, f"{pct:.0f}% used", "usage limit", AMBER if pct < 100 else RED, "usage"))
+            else:
+                out.append(Alert("CLAUDE", label, f"{pct:.0f}% used", "back under the line", GREEN, "usage", "good"))
         return out
 
 

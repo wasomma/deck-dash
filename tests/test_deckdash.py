@@ -23,6 +23,7 @@ from deckdash.sources.bsod import merge_crashes, parse_events, summarize  # noqa
 from deckdash.sources.ci import normalize_repos, summarize_repo  # noqa: E402
 from deckdash.sources.claude import ClaudePoller, apply_event, project_name  # noqa: E402
 from deckdash.sources.claude import summarize as summarize_sessions  # noqa: E402
+from deckdash.sources.claude_usage import read_usage  # noqa: E402
 from deckdash.sources.media import is_active, parse_line  # noqa: E402
 from deckdash.sources.news import interleave, parse_feed  # noqa: E402
 from deckdash.sources.vps import parse_probe, service_state  # noqa: E402
@@ -31,9 +32,12 @@ from deckdash.tiles import TILES, OverlayTile, make_tile  # noqa: E402
 from deckdash.tiles.ci import wrap_text  # noqa: E402
 from deckdash.tiles.news import Strip  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "tools"))
+import claude_status  # noqa: E402
+
 FIX = ROOT / "tests" / "fixtures"
 GB = 1 << 30
-SOURCE_NAMES = ("weather", "sys", "gpu", "ping", "bitaxe", "ci", "vps", "bsod", "news", "claude", "media")
+SOURCE_NAMES = ("weather", "sys", "gpu", "ping", "bitaxe", "ci", "vps", "bsod", "news", "claude", "claude_usage", "media")
 
 
 @pytest.fixture
@@ -123,6 +127,15 @@ def claude_state(now):
     return summarize_sessions(sessions, now)
 
 
+def usage_state(now, tmp_path=None):
+    """The snapshot the statusLine command would have written, read back through the source."""
+    import tempfile
+    rec = claude_status.snapshot(json.loads((FIX / "statusline.json").read_text()), None, now)
+    path = pathlib.Path(tmp_path or tempfile.mkdtemp()) / "claude-usage.json"
+    claude_status.write(rec, path)
+    return read_usage(path, now)
+
+
 def media_state(now):
     art = Image.new("RGB", (300, 300))
     d = __import__("PIL.ImageDraw", fromlist=["Draw"]).Draw(art)
@@ -161,6 +174,7 @@ def sources():
         "bsod": StaticSource(bsod_state(now)),
         "news": StaticSource(news_state(now)),
         "claude": StaticSource(claude_state(now)),
+        "claude_usage": StaticSource(usage_state(now)),
         "media": StaticSource(media_state(now)),
     }
 
@@ -596,6 +610,62 @@ def test_claude_hook_script(tmp_path, monkeypatch):
     lines = [json.loads(line) for line in (tmp_path / "state" / "events.jsonl").read_text().splitlines()]
     assert lines[0]["event"] == "Notification" and lines[0]["message"] == "hi" and "transcript_path" not in lines[0]
     assert lines[1]["event"] == "Stop" and lines[1]["session_id"] == "s1"
+
+
+def test_claude_status_snapshot_merges_and_keeps_limits(tmp_path):
+    """rate_limits is absent until a bucket is live, so a later payload must not blank the meters."""
+    now = 1788800000.0
+    payload = json.loads((FIX / "statusline.json").read_text())
+    rec = claude_status.snapshot(payload, None, now)
+    assert rec["five_hour"]["used_pct"] == 12.4 and rec["seven_day"]["resets_at"] == 1789200000
+    assert rec["sessions"][payload["session_id"]]["ctx"]["used_pct"] == 42.2
+
+    # a second session, no rate_limits in its payload
+    other = {"session_id": "s2", "cwd": "C:/x/drift-duet", "model": {"display_name": "Sonnet 5"},
+             "context_window": {"used_percentage": 8.0, "context_window_size": 200000,
+                                "total_input_tokens": 16000, "total_output_tokens": 100}}
+    rec = claude_status.snapshot(other, rec, now + 10)
+    assert rec["five_hour"]["used_pct"] == 12.4  # inherited, not blanked
+    assert set(rec["sessions"]) == {payload["session_id"], "s2"}
+
+    path = tmp_path / "claude-usage.json"
+    claude_status.write(rec, path)
+    st = read_usage(path, now + 10)
+    assert st["statusline"] and st["ctx_pct"] == 8.0 and st["model"] == "Sonnet 5"  # newest session wins
+    assert st["project"] == "drift-duet" and st["week_pct"] == 63.0 and st["age"] == 0.0
+    assert "5h 12%" in claude_status.line(rec) and "wk 63%" in claude_status.line(rec)
+
+
+def test_read_usage_without_a_snapshot_is_not_an_error(tmp_path):
+    st = read_usage(tmp_path / "nope.json", time.time())
+    assert st["statusline"] is False and st["sessions"] == []
+    (tmp_path / "junk.json").write_text("not json")
+    assert read_usage(tmp_path / "junk.json", time.time())["statusline"] is False
+
+
+def test_usage_tile_greys_a_stale_snapshot(cfg, sources):
+    tile = make_tile("usage", cfg, sources)
+    now = time.time()
+    fresh = dict(sources["claude_usage"].state)
+    assert not tile._stale(fresh)
+    _assert_key(tile.render(now))
+    sources["claude_usage"]._state = dict(fresh, age=tile.stale_s + 60)
+    assert tile._stale(sources["claude_usage"].state)
+    _assert_key(tile.render(now))
+    sources["claude_usage"]._state = {"statusline": False, "sessions": []}
+    _assert_key(tile.render(now))
+    assert len(tile.render_zoom(now)) == 15
+
+
+def test_bsod_overlays_vps_only_while_a_crash_is_recent(cfg, sources):
+    tile = make_tile("bsod", cfg, sources)
+    now = time.time()
+    sources["bsod"]._state = dict(sources["bsod"].state, since_last=3600.0)
+    assert tile.active(now)
+    sources["bsod"]._state = dict(sources["bsod"].state, since_last=tile.overlay_s + 1)
+    assert not tile.active(now)
+    sources["bsod"]._state = dict(sources["bsod"].state, since_last=None)
+    assert not tile.active(now)  # a machine that has never crashed shows vps
 
 
 def test_media_parse_and_active():
