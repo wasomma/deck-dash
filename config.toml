@@ -110,6 +110,14 @@ session_minutes = 60      # a session with no assistant turn in this long stops 
 stale_minutes = 30     # snapshot older than this: bars go grey rather than reading a stale 0%
 alert_pct = 90         # toast when the 5-hour or weekly limit crosses this; 0 disables
 
+[claude_limits]
+# The 5-hour and weekly windows, from GET /api/oauth/usage - the only source that also carries
+# the per-model weeklies. Needs a signed-in CLI (claude auth login); the token is read from
+# ~/.claude/.credentials.json and never written. The endpoint rate-limits hard (a 429 came back
+# with retry-after ~54 min), and the numbers move slowly, so five minutes is generous.
+enabled = true
+poll_minutes = 5
+
 [nowplaying]
 enabled = true
 poll_seconds = 1

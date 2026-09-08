@@ -23,6 +23,7 @@ from deckdash.sources.bsod import merge_crashes, parse_events, summarize  # noqa
 from deckdash.sources.ci import normalize_repos, summarize_repo  # noqa: E402
 from deckdash.sources.claude import ClaudePoller, apply_event, project_name  # noqa: E402
 from deckdash.sources.claude import summarize as summarize_sessions  # noqa: E402
+from deckdash.sources.claude_limits import parse_usage, read_token  # noqa: E402
 from deckdash.sources.claude_usage import merge, read_snapshot, read_transcript  # noqa: E402
 from deckdash.sources.media import is_active, parse_line  # noqa: E402
 from deckdash.sources.news import interleave, parse_feed  # noqa: E402
@@ -37,7 +38,8 @@ import claude_status  # noqa: E402
 
 FIX = ROOT / "tests" / "fixtures"
 GB = 1 << 30
-SOURCE_NAMES = ("weather", "sys", "gpu", "ping", "bitaxe", "ci", "vps", "bsod", "news", "claude", "claude_usage", "media")
+SOURCE_NAMES = ("weather", "sys", "gpu", "ping", "bitaxe", "ci", "vps", "bsod", "news", "claude",
+                "claude_usage", "claude_limits", "media")
 
 
 @pytest.fixture
@@ -136,6 +138,11 @@ def usage_state(now, tmp_path=None):
     return merge(read_snapshot(path, now), [], now)
 
 
+def limits_state():
+    """What the usage endpoint returns on a plan that has a per-model weekly window."""
+    return parse_usage(json.loads((FIX / "oauth_usage.json").read_text()))
+
+
 def media_state(now):
     art = Image.new("RGB", (300, 300))
     d = __import__("PIL.ImageDraw", fromlist=["Draw"]).Draw(art)
@@ -175,6 +182,7 @@ def sources():
         "news": StaticSource(news_state(now)),
         "claude": StaticSource(claude_state(now)),
         "claude_usage": StaticSource(usage_state(now)),
+        "claude_limits": StaticSource(limits_state()),
         "media": StaticSource(media_state(now)),
     }
 

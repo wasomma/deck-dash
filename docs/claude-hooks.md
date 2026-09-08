@@ -114,3 +114,32 @@ python tools\claude_status.py --sample tests\fixtures\statusline.json
 Reads a captured payload instead of stdin and writes `state/claude-usage.json`. If the file is
 missing the tile reads `statusline off` rather than showing a false 0%; if the snapshot goes
 older than `[claude_usage] stale_minutes` the bars grey out and the key shows its age.
+
+
+# Plan limits: signing the CLI in
+
+The 5-hour, weekly and per-model windows come from `GET /api/oauth/usage` - the same endpoint
+`/usage` reads, and the only source that carries the **per-model** weekly. It needs a signed-in
+CLI:
+
+```
+claude auth login
+```
+
+(`claude auth` on its own only prints help. `claude auth status` shows whether it took.)
+
+`claude setup-token` is **not** enough: those sessions default to `user:inference` scope, and the
+endpoint's own schema says `rate_limits` comes back null without `user:profile`.
+
+deck-dash reads `~/.claude/.credentials.json` on each poll and **never writes it**, so a refresh
+by the CLI is picked up and nothing here can invalidate your login. When the token has expired the
+request is not made at all and the tile says `claude auth login`.
+
+> **The endpoint rate-limits hard.** Two probes earned a 429 with `retry-after: 3264` (~54 min).
+> The numbers move slowly - a 5-hour window shifts at most 0.33 % a minute - so `[claude_limits]
+> poll_minutes` defaults to 5, and a 429 is honoured to the second rather than retried. Set
+> `enabled = false` to switch the poller off entirely.
+
+The access token lasts about eight hours. The CLI refreshes it whenever you use it; if you only
+work in the Desktop app, expect to run `claude auth login` again roughly daily, and the limit bars
+to dash out until you do.

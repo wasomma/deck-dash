@@ -35,6 +35,14 @@ The version itself lives in `deckdash/__init__.py`; `pyproject.toml` reads it fr
   renders its own UI, so it has none to fill. On a Desktop-only machine the transcript is the
   only context source and the limit bars show `-` until an authenticated source exists for them.
 
+- The **limit windows come from `GET /api/oauth/usage`**, the endpoint `/usage` itself reads, and
+  with them the **per-model weekly** - `model_scoped` entries the server labels itself, so the
+  Fable bar is named by the plan rather than guessed. Needs `claude auth login`;
+  `claude setup-token` cannot work, since those sessions lack the `user:profile` scope the
+  endpoint requires. The credential file is read, never written.
+- The key sizes its rows to however many windows the plan has rather than assuming three, so a
+  per-model bar appears without crowding the others off a 72 px key.
+
 - A toast when the 5-hour or weekly limit crosses `[claude_usage] alert_pct` (90 by default),
   and another when it drops back under.
 
