@@ -9,6 +9,35 @@ the GitHub release notes are that version's section of this file.
 
 The version itself lives in `deckdash/__init__.py`; `pyproject.toml` reads it from there.
 
+## [Unreleased]
+
+### Added
+
+- A **`usage` tile** for Claude Code: three bars on one key — the context window of the newest
+  session, the 5-hour limit and the weekly all-models limit — each coloured green through amber
+  to red, with the worst of the three as a heading. Zoom gives each meter a full row with exact
+  token counts, the model, and a reset countdown.
+- The numbers come from Claude Code's **statusLine** command rather than from hooks:
+  `tools/claude_status.py` caches the payload it is handed into `state/claude-usage.json` and
+  echoes a compact line back, so the terminal status line reads the same three numbers. Setup is
+  in `docs/claude-hooks.md`; without it the tile reads `statusline off` instead of a false 0%,
+  and a snapshot older than `[claude_usage] stale_minutes` greys the bars and shows its age.
+- A toast when the 5-hour or weekly limit crosses `[claude_usage] alert_pct` (90 by default),
+  and another when it drops back under.
+
+  There is no weekly Fable bar. Claude Code tracks only `five_hour`, `seven_day`,
+  `seven_day_overage_included` and `overage` from its response headers, and the statusLine
+  payload narrows that further; the per-model weekly lives only in the `/api/oauth/usage` API,
+  which needs an OAuth token deck-dash does not hold. The zoom view labels the slot `Fable: n/a`
+  rather than leaving a silent gap.
+
+### Changed
+
+- **`bsod` now shares the `vps` key** as an overlay instead of holding key 10 of its own, which
+  is what made room for `usage`. It takes the key for `[bsod] overlay_hours` (48) after a crash
+  and shows the VPS the rest of the time — a bugcheck is rare and important, which is exactly
+  what the overlay mechanism is for.
+
 ## [0.3.0] - 2026-09-07
 
 ### Changed

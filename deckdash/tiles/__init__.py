@@ -12,6 +12,7 @@ from .net import NetTile
 from .news import NewsTile
 from .nowplaying import NowPlayingTile
 from .overlay import OverlayTile
+from .usage import UsageTile
 from .vps import VpsTile
 from .weather import ForecastTile, WeatherNowTile
 
@@ -29,6 +30,7 @@ TILES: dict[str, type[Tile]] = {
     "news": NewsTile,
     "claude": ClaudeTile,
     "nowplaying": NowPlayingTile,
+    "usage": UsageTile,
 }
 
 __all__ = ["Tile", "TILES", "OverlayTile", "make_tile"]

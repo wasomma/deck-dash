@@ -77,6 +77,7 @@ services = []
 [bsod]
 poll_seconds = 60
 window_days = 30       # crash count shown on the tile covers this many days
+overlay_hours = 48     # bsod shares the vps key: it takes the key only this long after a crash
 max_events = 60
 
 [news]
@@ -98,6 +99,14 @@ toast_seconds = 5      # full-deck toast, then a badge on the owning tile until 
 poll_seconds = 2
 show_minutes = 15      # the Claude tile keeps its key this long after a session's last event
 
+[claude_usage]
+# Fed by tools/claude_status.py wired as Claude Code's statusLine command (docs/claude-hooks.md).
+# Context window, the 5-hour limit and the weekly all-models limit; there is no weekly Fable
+# number because Claude Code does not put one in the statusLine payload.
+poll_seconds = 5
+stale_minutes = 30     # snapshot older than this: bars go grey rather than reading a stale 0%
+alert_pct = 90         # toast when the 5-hour or weekly limit crosses this; 0 disables
+
 [nowplaying]
 enabled = true
 poll_seconds = 1
@@ -108,9 +117,9 @@ ignore_apps = []             # substrings of source app ids to ignore, e.g. ["ms
 # 15 slots, row-major from the top-left key. "" leaves a key dark. A wide tile (news) is
 # listed once per key it spans. overlays: {base = "top"} lets the top tile take the base
 # tile's key while it has something to show (music playing, a Claude session alive).
-overlays = { forecast = "nowplaying", net = "claude" }
+overlays = { forecast = "nowplaying", net = "claude", vps = "bsod" }
 keys = [
   "clock", "weather", "forecast", "gpu",  "cpu",
-  "net",   "bitaxe",  "ci",       "vps",  "bsod",
+  "net",   "bitaxe",  "ci",       "vps",  "usage",
   "news",  "news",    "news",     "news", "news",
 ]

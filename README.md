@@ -136,7 +136,7 @@ string = dark key. The default board:
 | | col 1 | col 2 | col 3 | col 4 | col 5 |
 |---|---|---|---|---|---|
 | row 1 | `clock` | `weather` | `forecast` (next 5 h) | `gpu` | `cpu` |
-| row 2 | `net` | `bitaxe` | `ci` | `vps` | `bsod` |
+| row 2 | `net` | `bitaxe` | `ci` | `vps` | `usage` (Claude) |
 | row 3 | `news` marquee across all five keys | | | | |
 
 Press any tile for its zoom view (10 s, any press returns). The news zoom shows five
@@ -153,11 +153,17 @@ the owning tile until it is pressed: a CI run fails (and passes again), the Bita
 the LAN (and returns) or sets a new best difficulty, a VPS service goes down (and comes back),
 a new bugcheck appears in the System log after a reboot, a Claude Code session needs input.
 
-Two tiles overlay others only while they have something to show (`[layout] overlays`): the
+Three tiles overlay others only while they have something to show (`[layout] overlays`): the
 now-playing tile takes the forecast key while music plays (album art, sliding title, progress;
-zoom has previous / play-pause / next on the bottom row) and the Claude tile takes the net key
-while a Claude Code session is working, waiting for you, or just finished. The Claude tile
-needs five hooks in `~/.claude/settings.json`; see `docs/claude-hooks.md`.
+zoom has previous / play-pause / next on the bottom row), the Claude tile takes the net key
+while a Claude Code session is working, waiting for you, or just finished, and `bsod` takes the
+vps key for 48 hours after a crash (`[bsod] overlay_hours`) — a clean month shows the VPS.
+
+The two Claude tiles need wiring in `~/.claude/settings.json`, both covered by
+`docs/claude-hooks.md`: five hooks for the session tile, and a `statusLine` command for the
+`usage` tile. `usage` shows the context window of the newest session, the 5-hour limit and the
+weekly all-models limit as three bars; there is no weekly Fable bar because Claude Code does
+not put a per-model number in the statusLine payload.
 
 Bezel gap: the scenes and the ticker draw on a virtual canvas that includes the gaps between
 keys. Calibrate it once on the real deck with `.venv\Scripts\python tools\calibrate.py`
@@ -183,6 +189,9 @@ overridden there key by key.
 - BSOD watch: `wevtutil` reads Kernel-Power 41 and BugCheck 1001 from the System log; the
   tile shows time since the last bugcheck, the 30-day count and uptime, with a 30-day strip.
 - News: feedparser over the configured RSS feeds every 10 min.
+- Claude sessions: hook calls appended to `state/claude-events.jsonl`, tailed every 2 s.
+- Claude usage: Claude Code's statusLine command writes `state/claude-usage.json`, read every
+  5 s. Context window is per session; the 5-hour and weekly limits are account-wide.
 
 ## Layout of the code
 
@@ -198,6 +207,7 @@ overridden there key by key.
 - `deckdash/session.py`: Windows lock detection (polled).
 - `deckdash/app.py`: the render loop: board, zoom, toast, ambient, locked.
 - `tools/install_task.ps1`: the logon task; `tools/calibrate.py`: bezel-gap calibration;
-  `tools/media_watch.ps1`: the media-session helper; `tools/claude_hook.py`: the hook.
+  `tools/media_watch.ps1`: the media-session helper; `tools/claude_hook.py`: the session hook;
+  `tools/claude_status.py`: the statusLine command behind the usage tile.
 
 Tests: `.venv\Scripts\python -m pytest -q`
