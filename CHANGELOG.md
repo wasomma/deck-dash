@@ -50,6 +50,10 @@ The version itself lives in `deckdash/__init__.py`; `pyproject.toml` reads it fr
   rotates, so the reply must be persisted or the old one is dead and the CLI is signed out. Other
   keys in the file are preserved, the write is atomic and re-read before it replaces anything,
   and a rejected refresh leaves the file exactly as it was.
+- In the zoom, the limit windows split by kind rather than by arrival order: the account-wide
+  ones share a row two keys each, and a **per-model window gets a row to itself**. It first
+  appeared squeezed onto one spare key, which made the smallest thing on the screen the limit
+  the screen existed for.
 - The key sizes its rows to however many windows the plan has rather than assuming three, so a
   per-model bar appears without crowding the others off a 72 px key.
 

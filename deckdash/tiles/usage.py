@@ -14,7 +14,7 @@ from ..canvas import Canvas
 from ..gfx import DIM, FG, PURPLE, TRACK, fit_size, fmt_duration, heat, hbar, new_key, text
 from .base import Tile
 
-ZOOM_LABEL = {"5H": "5-HOUR", "WK": "WEEKLY"}
+ZOOM_LABEL = {"CTX": "CONTEXT", "5H": "5-HOUR", "WK": "WEEKLY"}  # the key is cramped; the zoom is not
 
 
 def _tokens(n: float) -> str:
@@ -52,7 +52,9 @@ class UsageTile(Tile):
         rows = [{"label": "CTX", "pct": st.get("ctx_pct"), "resets_at": 0.0}]
         limits = self.sources["claude_limits"].state
         got = limits.get("buckets") or []
-        rows += [{"label": b["label"], "pct": b["pct"], "resets_at": b.get("resets_at", 0.0)} for b in got]
+        rows += [{"label": b["label"], "pct": b["pct"], "resets_at": b.get("resets_at", 0.0),
+                  "model": str(b.get("key", "")).startswith("model:"), "critical": b.get("critical", False)}
+                 for b in got]
         if not got:  # nothing signed in yet: keep the two rows, dashed, so the key keeps its shape
             rows += [{"label": "5H", "pct": None, "resets_at": 0.0}, {"label": "WK", "pct": None, "resets_at": 0.0}]
         return rows
@@ -105,6 +107,28 @@ class UsageTile(Tile):
             text(d, (68, 8), _age(st.get("age", 0.0)), 8, DIM, anchor="rm")
         return img
 
+    def _row(self, c, row: int, group: list[dict], now: float, stale: bool) -> None:
+        """One zoom row: a single window across the whole row, or two sharing it two keys each.
+
+        Sharing beats stacking here - a window squeezed onto one spare key was how the Fable
+        limit first appeared, and it was the smallest thing on a screen it was the reason for."""
+        base = row * 5
+        pairs = [(0, 1, 0, 1), (3, 4, 3, 4)] if len(group) > 1 else [(0, 2, 0, 4)]
+        for m, (label_key, value_key, bar_a, bar_b) in zip(group, pairs):
+            value = m["pct"]
+            frac = 0.0 if value is None else value / 100
+            colour = TRACK if (value is None or stale) else heat(frac)
+            x0, _, x1, _ = c.span_box(base + bar_a, base + bar_b)
+            _, _, _, y1 = c.rows_box(row, row)
+            hbar(c.draw, (x0 + 4, y1 - 12, x1 - 4, y1 - 5), frac, colour)
+            label = ZOOM_LABEL.get(m["label"], m["label"])
+            c.key_text(base + label_key, label, 13, DIM, where="t", pad=8, weight="semibold")
+            reset = _resets(now, m["resets_at"])
+            if reset:
+                c.key_text(base + label_key, reset, 10, DIM, where="t", pad=26, weight="semibold")
+            c.key_text(base + value_key, "-" if value is None else f"{value:.0f}%",
+                       28 if len(group) > 1 else 30, FG if not stale else DIM, dy=-6)
+
     def render_zoom(self, now):
         st = self.sources["claude_usage"].state
         c = Canvas(self.gap)
@@ -115,27 +139,22 @@ class UsageTile(Tile):
 
         stale = self._stale(st)
         meters = self._meters()
-        # Row 0 is the context window with its detail; the limit windows take rows 1 and 2, and
-        # anything past that (a plan with both an Opus and a Sonnet weekly) rides row 2's spare keys.
-        for row, m in enumerate(meters[:3]):
-            value = m["pct"]
-            frac = 0.0 if value is None else value / 100
-            colour = TRACK if (value is None or stale) else heat(frac)
-            x0, y0, x1, y1 = c.rows_box(row, row)
-            hbar(c.draw, (x0 + 4, y1 - 12, x1 - 4, y1 - 5), frac, colour)
-            label = "CONTEXT" if row == 0 else ZOOM_LABEL.get(m["label"], m["label"])
-            c.key_text(row * 5, label, 13, DIM, where="t", pad=8, weight="semibold")
-            c.key_text(row * 5 + 2, "-" if value is None else f"{value:.0f}%", 30,
-                       FG if not stale else DIM, dy=-6)
-            if row and m["resets_at"]:
-                c.key_text(row * 5 + 4, _resets(now, m["resets_at"]), 11, DIM, dy=-6, weight="semibold")
 
-        for i, m in enumerate(meters[3:5]):  # spare keys on the bottom row
-            shown = "-" if m["pct"] is None else f"{m['pct']:.0f}%"
-            c.key_text(11 + i * 2, f"{m['label']} {shown}", 11, DIM, dy=-6, weight="semibold")
-
-        if len(meters) < 2 or all(m["pct"] is None for m in meters[1:]):
-            c.key_text(13, "claude auth login", 10, DIM, dy=8, weight="semibold")
+        # Row 0 is the context window and its detail. The limit windows split by kind rather than
+        # by arrival order: the account-wide ones share row 1, the per-model ones row 2, so a
+        # per-model limit gets a row of its own instead of whatever key happened to be spare.
+        limits = meters[1:]
+        wide = [m for m in limits if not m.get("model")]
+        scoped = [m for m in limits if m.get("model")]
+        if not scoped:            # no per-model window: one limit per row, as before
+            wide, scoped = wide[:1], wide[1:2]
+        self._row(c, 0, [meters[0]], now, stale)
+        if wide:
+            self._row(c, 1, wide[:2], now, stale)
+        if scoped:
+            self._row(c, 2, scoped[:2], now, stale)
+        if not limits:
+            c.key_text(12, "claude auth login", 12, DIM, dy=-6, weight="semibold")
 
         ctx_size = st.get("ctx_size") or 0.0
         if ctx_size:
@@ -144,6 +163,7 @@ class UsageTile(Tile):
         model = st.get("model") or ""
         if model:
             c.key_text(4, model, fit_size(model, 58, 12, weight="semibold"), DIM, dy=-6, weight="semibold")
+
         # Name the session the key is reporting, and say how many others are live: with several
         # sessions running, an unlabelled percentage does not say which one it belongs to.
         project = st.get("project") or ""
