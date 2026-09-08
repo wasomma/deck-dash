@@ -23,7 +23,7 @@ from deckdash.sources.bsod import merge_crashes, parse_events, summarize  # noqa
 from deckdash.sources.ci import normalize_repos, summarize_repo  # noqa: E402
 from deckdash.sources.claude import ClaudePoller, apply_event, project_name  # noqa: E402
 from deckdash.sources.claude import summarize as summarize_sessions  # noqa: E402
-from deckdash.sources.claude_usage import read_usage  # noqa: E402
+from deckdash.sources.claude_usage import merge, read_snapshot, read_transcript  # noqa: E402
 from deckdash.sources.media import is_active, parse_line  # noqa: E402
 from deckdash.sources.news import interleave, parse_feed  # noqa: E402
 from deckdash.sources.vps import parse_probe, service_state  # noqa: E402
@@ -128,12 +128,12 @@ def claude_state(now):
 
 
 def usage_state(now, tmp_path=None):
-    """The snapshot the statusLine command would have written, read back through the source."""
+    """What the source hands the tile: a statusLine snapshot, merged the way fetch() does."""
     import tempfile
     rec = claude_status.snapshot(json.loads((FIX / "statusline.json").read_text()), None, now)
     path = pathlib.Path(tmp_path or tempfile.mkdtemp()) / "claude-usage.json"
     claude_status.write(rec, path)
-    return read_usage(path, now)
+    return merge(read_snapshot(path, now), [], now)
 
 
 def media_state(now):
@@ -630,17 +630,63 @@ def test_claude_status_snapshot_merges_and_keeps_limits(tmp_path):
 
     path = tmp_path / "claude-usage.json"
     claude_status.write(rec, path)
-    st = read_usage(path, now + 10)
-    assert st["statusline"] and st["ctx_pct"] == 8.0 and st["model"] == "Sonnet 5"  # newest session wins
+    st = merge(read_snapshot(path, now + 10), [], now + 10)
+    assert st["source"] == "statusline" and st["ctx_pct"] == 8.0 and st["model"] == "Sonnet 5"
     assert st["project"] == "drift-duet" and st["week_pct"] == 63.0 and st["age"] == 0.0
     assert "5h 12%" in claude_status.line(rec) and "wk 63%" in claude_status.line(rec)
 
 
-def test_read_usage_without_a_snapshot_is_not_an_error(tmp_path):
-    st = read_usage(tmp_path / "nope.json", time.time())
-    assert st["statusline"] is False and st["sessions"] == []
+def test_usage_falls_back_to_the_transcript_when_no_statusline_ran(tmp_path):
+    """The Desktop app never runs the statusLine command, so the transcript is the only context
+    source there. It carries no limits and no window size - the window comes from config."""
+    now = 1788830000.0
+    assert read_snapshot(tmp_path / "nope.json", now) is None
     (tmp_path / "junk.json").write_text("not json")
-    assert read_usage(tmp_path / "junk.json", time.time())["statusline"] is False
+    assert read_snapshot(tmp_path / "junk.json", now) is None
+    assert merge(None, [], now)["source"] == "none"
+
+    jsonl = tmp_path / "session.jsonl"
+    rec = lambda used, ts, side=False: json.dumps({
+        "type": "assistant", "isSidechain": side, "cwd": "C:/x/deck-dash", "timestamp": ts,
+        "message": {"model": "claude-opus-5", "usage": {
+            "input_tokens": 2, "cache_creation_input_tokens": 1000, "cache_read_input_tokens": used,
+            "output_tokens": 500}}})
+    jsonl.write_text("\n".join([
+        rec(100_000, "2026-09-08T01:00:00.000Z"),
+        rec(900_000, "2026-09-08T01:05:00.000Z", side=True),   # a subagent turn, not the session
+        rec(399_000, "2026-09-08T01:10:00.000Z"),
+    ]), encoding="utf-8")
+
+    tr = read_transcript(jsonl, 1_000_000)
+    assert tr["ctx_in"] == 400_002 and round(tr["ctx_pct"], 1) == 40.0  # the sidechain is skipped
+    assert tr["model"] == "claude-opus-5" and tr["project"] == "deck-dash" and tr["from"] == "transcript"
+
+    st = merge(None, [tr], now)
+    assert st["source"] == "transcript" and st["five_pct"] is None and st["week_pct"] is None
+    assert st["limits_age"] is None  # nothing has ever supplied the limits
+
+
+def test_usage_key_reports_the_worst_of_several_live_sessions():
+    """Wes runs several sessions at once. Picking the most recently written transcript made the
+    bar flip between them with nothing to say which one it meant; the key takes the worst and
+    names it, and the zoom says how many others are live."""
+    now = 1788830000.0
+    def sess(project, pct, at):
+        return {"ctx_pct": pct, "ctx_size": 1e6, "ctx_in": pct * 1e4, "ctx_out": 0.0,
+                "model": "claude-opus-5", "project": project, "at": at, "from": "transcript"}
+    st = merge(None, [sess('deck-dash', 44.0, now - 2), sess('fpv-sim-app', 61.0, now - 300),
+                      sess('guild-mp', 12.0, now - 60)], now)
+    assert st["ctx_pct"] == 61.0 and st["project"] == "fpv-sim-app"  # worst wins, and is named
+    assert [x["project"] for x in st["sessions"]] == ["fpv-sim-app", "deck-dash", "guild-mp"]
+    assert st["age"] == 2.0  # freshness is the freshest session, not the worst one
+
+    # A statusLine snapshot is Claude Code's own reading, so it replaces that project's transcript
+    # rather than being counted a second time alongside it.
+    snap = dict(sess('deck-dash', 50.0, now), **{'from': 'statusline', 'five_pct': 9.0, 'week_pct': 70.0,
+                                                 'five_reset': 0.0, 'week_reset': 0.0})
+    st = merge(snap, [sess('deck-dash', 44.0, now - 2), sess('guild-mp', 12.0, now - 60)], now)
+    assert [x["project"] for x in st["sessions"]] == ["deck-dash", "guild-mp"]
+    assert st["sessions"][0]["ctx_pct"] == 50.0 and st["week_pct"] == 70.0
 
 
 def test_usage_tile_greys_a_stale_snapshot(cfg, sources):

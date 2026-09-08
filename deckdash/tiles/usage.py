@@ -18,9 +18,10 @@ ZOOM_ROWS = (("CONTEXT", "ctx_pct"), ("5-HOUR", "five_pct"), ("WEEKLY", "week_pc
 
 
 def _tokens(n: float) -> str:
-    if n >= 1000:
-        v = n / 1000
-        return f"{v:.0f}k" if v >= 10 else f"{v:.1f}k"
+    for suffix, div in (("M", 1_000_000), ("k", 1000)):
+        if n >= div:
+            v = n / div
+            return f"{v:.0f}{suffix}" if v >= 10 else f"{v:.1f}{suffix}"
     return f"{n:.0f}"
 
 
@@ -60,10 +61,9 @@ class UsageTile(Tile):
 
         if not st:
             return self.placeholder("CLAUDE", src.error or "loading")
-        if not st.get("statusline", True):
-            text(d, (36, 34), "statusline", 10, DIM)
-            text(d, (36, 46), "off", 10, DIM)
-            text(d, (36, 60), "see docs", 8, DIM, weight="regular")
+        if st.get("source", "none") == "none":
+            text(d, (36, 38), "no sessions", 10, DIM)
+            text(d, (36, 52), "see docs", 8, DIM, weight="regular")
             self.refresh = 5.0
             return img
 
@@ -92,8 +92,8 @@ class UsageTile(Tile):
     def render_zoom(self, now):
         st = self.sources["claude_usage"].state
         c = Canvas(self.gap)
-        if not st or not st.get("statusline", True):
-            c.key_text(7, "statusline off", 14, DIM)
+        if not st or st.get("source", "none") == "none":
+            c.key_text(7, "no sessions", 14, DIM)
             c.key_text(12, "see docs/claude-hooks.md", 9, DIM, weight="semibold")
             return c.slice()
 
@@ -116,12 +116,18 @@ class UsageTile(Tile):
             c.key_text(4, model, fit_size(model, 58, 12, weight="semibold"), DIM, dy=-6, weight="semibold")
 
         c.key_text(9, _resets(now, st.get("five_reset") or 0.0), 11, DIM, dy=-6, weight="semibold")
-        c.key_text(13, "Fable: n/a", 11, DIM, dy=-6, weight="semibold")  # not in the statusLine payload
+        if st.get("week_pct") is None:  # Desktop never runs statusLine, so the limits need the API
+            c.key_text(13, "run: claude auth", 11, DIM, dy=-6, weight="semibold")
         c.key_text(14, _resets(now, st.get("week_reset") or 0.0), 11, DIM, dy=-6, weight="semibold")
 
+        # Name the session the key is reporting, and say how many others are live: with several
+        # sessions running, an unlabelled percentage does not say which one it belongs to.
         project = st.get("project") or ""
+        others = max(0, len(st.get("sessions") or []) - 1)
         if project:
-            c.key_text(1, project, fit_size(project, 58, 12, weight="semibold"), DIM, dy=-6, weight="semibold")
+            c.key_text(1, project, fit_size(project, 58, 12, weight="semibold"), DIM, dy=-14, weight="semibold")
+        if others:
+            c.key_text(1, f"+{others} more session" + ("s" if others > 1 else ""), 9, DIM, dy=2, weight="semibold")
         if stale:
             c.key_text(6, _age(st.get("age", 0.0)), 12, DIM, dy=-6, weight="semibold")
         return c.slice()

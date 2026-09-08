@@ -162,8 +162,8 @@ vps key for 48 hours after a crash (`[bsod] overlay_hours`) — a clean month sh
 The two Claude tiles need wiring in `~/.claude/settings.json`, both covered by
 `docs/claude-hooks.md`: five hooks for the session tile, and a `statusLine` command for the
 `usage` tile. `usage` shows the context window of the newest session, the 5-hour limit and the
-weekly all-models limit as three bars; there is no weekly Fable bar because Claude Code does
-not put a per-model number in the statusLine payload.
+weekly all-models limit as three bars. The context bar works everywhere; the two limit bars
+need a terminal session, because Desktop never runs a status line.
 
 Bezel gap: the scenes and the ticker draw on a virtual canvas that includes the gaps between
 keys. Calibrate it once on the real deck with `.venv\Scripts\python tools\calibrate.py`
@@ -190,8 +190,10 @@ overridden there key by key.
   tile shows time since the last bugcheck, the 30-day count and uptime, with a 30-day strip.
 - News: feedparser over the configured RSS feeds every 10 min.
 - Claude sessions: hook calls appended to `state/claude-events.jsonl`, tailed every 2 s.
-- Claude usage: Claude Code's statusLine command writes `state/claude-usage.json`, read every
-  5 s. Context window is per session; the 5-hour and weekly limits are account-wide.
+- Claude usage: the context window comes from the newest session transcript under
+  `~/.claude/projects/`, tail-read every 5 s and only re-parsed when it changes. The 5-hour and
+  weekly limits come from Claude Code's statusLine command (`state/claude-usage.json`), which
+  only terminal sessions run - the Desktop app fires hooks but never invokes a status line.
 
 ## Layout of the code
 

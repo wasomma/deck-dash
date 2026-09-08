@@ -17,11 +17,24 @@ The version itself lives in `deckdash/__init__.py`; `pyproject.toml` reads it fr
   session, the 5-hour limit and the weekly all-models limit — each coloured green through amber
   to red, with the worst of the three as a heading. Zoom gives each meter a full row with exact
   token counts, the model, and a reset countdown.
-- The numbers come from Claude Code's **statusLine** command rather than from hooks:
+- The context window is read from the **session transcript** (`~/.claude/projects/*/*.jsonl`),
+  which every session writes, Desktop included. Only the last assistant record is parsed, from a
+  256 KB tail read, and only when the file's mtime changes - 0.02 ms per poll at rest, 1.4 ms
+  when a turn lands. `[claude_usage] context_window` supplies the denominator, since the
+  transcript records token counts but not the window size; the zoom shows the raw count too.
+- The 5-hour and weekly numbers come from Claude Code's **statusLine** command rather than hooks:
   `tools/claude_status.py` caches the payload it is handed into `state/claude-usage.json` and
   echoes a compact line back, so the terminal status line reads the same three numbers. Setup is
-  in `docs/claude-hooks.md`; without it the tile reads `statusline off` instead of a false 0%,
+  in `docs/claude-hooks.md`; a tile with no source at all reads `no sessions`, never a false 0%,
   and a snapshot older than `[claude_usage] stale_minutes` greys the bars and shows its age.
+
+  **The Desktop app does not run the statusLine command.** Measured 2026-09-07: a fresh Desktop
+  session fired its SessionStart and UserPromptSubmit hooks into `state/claude-events.jsonl` and
+  never touched `state/claude-usage.json` - same settings file, same `python "..."` command form,
+  trusted workspace, `disableAllHooks` unset. The status line is a terminal element and Desktop
+  renders its own UI, so it has none to fill. On a Desktop-only machine the transcript is the
+  only context source and the limit bars show `-` until an authenticated source exists for them.
+
 - A toast when the 5-hour or weekly limit crosses `[claude_usage] alert_pct` (90 by default),
   and another when it drops back under.
 

@@ -104,6 +104,9 @@ show_minutes = 15      # the Claude tile keeps its key this long after a session
 # Context window, the 5-hour limit and the weekly all-models limit; there is no weekly Fable
 # number because Claude Code does not put one in the statusLine payload.
 poll_seconds = 5
+context_window = 1000000   # denominator for the CTX bar: the transcript records tokens, not the
+                           # window size. 1M matches the [1m] models; drop to 200000 for others.
+session_minutes = 60      # a session with no assistant turn in this long stops counting as live
 stale_minutes = 30     # snapshot older than this: bars go grey rather than reading a stale 0%
 alert_pct = 90         # toast when the 5-hour or weekly limit crosses this; 0 disables
 

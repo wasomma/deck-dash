@@ -63,7 +63,17 @@ The `usage` tile shows three bars: the context window of the newest session, the
 and the weekly all-models limit. It sits on key 10 and pressing it zooms to a row per meter
 with exact token counts and reset countdowns.
 
-It is fed by Claude Code's **statusLine** command, not by hooks. Claude Code hands that command
+The context window comes from the **session transcript** (`~/.claude/projects/*/*.jsonl`), which
+every session writes - Desktop included - so that bar needs no setup at all.
+
+The 5-hour and weekly bars are fed by Claude Code's **statusLine** command, not by hooks.
+
+> **The Desktop Code tab does not run the statusLine command.** Measured 2026-09-07: a fresh
+> Desktop session fired its hooks into `state/claude-events.jsonl` and never touched
+> `state/claude-usage.json`, with the same settings file and the same `python "..."` command
+> form. The status line is a terminal element; Desktop renders its own UI and has none to fill.
+> So on a Desktop-only machine those two bars stay `-` and the statusLine setup below only helps
+> if you also work in a terminal. Claude Code hands that command
 a JSON payload on stdin carrying `context_window` and `rate_limits`; `tools/claude_status.py`
 caches the numbers in `state/claude-usage.json` (gitignored) and echoes a compact line back, so
 the terminal status line reads `ctx 42%  ·  5h 12%  ·  wk 63%` at the same time.
