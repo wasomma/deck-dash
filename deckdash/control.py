@@ -13,9 +13,12 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from multiprocessing.connection import Client, Listener
 from pathlib import Path
+
+from . import config
 
 log = logging.getLogger(__name__)
 
@@ -144,16 +147,39 @@ def send(cmd: str, args: list[str] | None = None, pipe: str = DEFAULT_PIPE, time
 
 # --- processes that must outlive this one ---------------------------------------------------
 
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+PS_LOG = config.ROOT / "logs" / "powershell.log"
+
+
 def run_powershell(script: str, console: bool = False) -> int | None:
-    """Start PowerShell on ``script`` detached from this process. Task Scheduler's job has the
-    silent-breakaway flag, so the child leaves the job and survives the app's own restart."""
+    """Start PowerShell on ``script`` in a process that outlives this one.
+
+    Not DETACHED_PROCESS: with no console PowerShell exits 0 without running ``-Command`` at all,
+    so every restart from the tray, the dashboard and ``ctl restart`` reported a pid and did
+    nothing (measured 2026-09-07). CREATE_NO_WINDOW hides the window and still runs the script,
+    and survival does not depend on the flag anyway: the task's job carries silent-breakaway
+    (limit flags 0x3000), so children leave the job on their own.
+
+    Output goes to ``logs/powershell.log`` rather than DEVNULL. That is what made the failure
+    silent: a restart that throws must leave a trace somewhere.
+    """
     if sys.platform != "win32":
         return None
-    flags = subprocess.CREATE_NEW_PROCESS_GROUP | (subprocess.CREATE_NEW_CONSOLE if console else subprocess.DETACHED_PROCESS)
-    out = None if console else subprocess.DEVNULL
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP | (subprocess.CREATE_NEW_CONSOLE if console else _NO_WINDOW)
+    out = None
+    if not console:
+        try:
+            PS_LOG.parent.mkdir(parents=True, exist_ok=True)
+            out = open(PS_LOG, "a", encoding="utf-8", errors="replace")  # noqa: SIM115 - the child owns it
+            out.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} {script}\n")
+            out.flush()
+        except OSError:
+            out = subprocess.DEVNULL
     proc = subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
                             creationflags=flags, stdin=subprocess.DEVNULL, stdout=out, stderr=out, close_fds=True)
-    log.info("detached powershell pid %d: %s", proc.pid, script)
+    if hasattr(out, "close"):
+        out.close()  # the child holds its own handle now
+    log.info("powershell pid %d: %s", proc.pid, script)
     return proc.pid
 
 

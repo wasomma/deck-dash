@@ -31,6 +31,18 @@ The version itself lives in `deckdash/__init__.py`; `pyproject.toml` reads it fr
   which needs an OAuth token deck-dash does not hold. The zoom view labels the slot `Fable: n/a`
   rather than leaving a silent gap.
 
+### Fixed
+
+- **Restarting deck-dash from the app did nothing, silently.** `run_powershell` started the
+  child with `DETACHED_PROCESS`, which leaves PowerShell without a console: it exits 0 without
+  running its `-Command` at all. The tray's Restart, the dashboard's Restart and
+  `deckdash ctl restart` all reported a pid and left the old process running. It now uses
+  `CREATE_NO_WINDOW`, which still hides the window; survival never depended on the flag, since
+  the task's job carries silent-breakaway (limit flags 0x3000) and children leave it on their own.
+- The same helper sent the child's stdout and stderr to `DEVNULL`, which is what made the
+  failure invisible. It now appends them to `logs/powershell.log` with the script and a
+  timestamp, so a restart that throws leaves a trace.
+
 ### Changed
 
 - **`bsod` now shares the `vps` key** as an overlay instead of holding key 10 of its own, which

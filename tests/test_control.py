@@ -3,19 +3,22 @@
 import copy
 import os
 import pathlib
+import subprocess
 import sys
 import threading
 import time
+
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from test_deckdash import cfg, sources  # noqa: E402,F401 - the shared fixtures
 
-from deckdash import ctl  # noqa: E402
+from deckdash import control, ctl  # noqa: E402
 from deckdash.app import App, Request  # noqa: E402
 from deckdash.control import (ControlServer, calibrate_script, pipe_address,  # noqa: E402
-                              restart_script, send, validate)
+                              restart_script, run_powershell, send, validate)
 from deckdash.device import SimDeck  # noqa: E402
 from deckdash.gfx import AMBER, DIM, GREEN  # noqa: E402
 from deckdash.main import main as deckdash_main  # noqa: E402
@@ -306,3 +309,31 @@ def test_task_scripts_restart_even_when_abandoned():
     tail = cal[cal.index("finally"):]  # Ctrl+C or a crashing tool must still reach the -Start
     assert "-Start" in tail and "Read-Host" in tail
     assert "closed with the X" in cal[:cal.index("try {")]  # the one path a finally cannot cover
+
+@pytest.mark.skipif(sys.platform != "win32", reason="windows process flags")
+def test_run_powershell_gives_the_child_a_console_and_a_log(monkeypatch, tmp_path):
+    """DETACHED_PROCESS leaves PowerShell with no console: it exits 0 without running -Command
+    at all, so the tray, the dashboard and ``ctl restart`` all reported a pid and did nothing.
+    Output must not go to DEVNULL either - that is what kept the failure silent."""
+    seen = {}
+
+    class _Fake:
+        pid = 4242
+
+        def __init__(self, argv, **kw):
+            seen.update(kw, argv=argv)
+
+    monkeypatch.setattr(control.subprocess, "Popen", _Fake)
+    monkeypatch.setattr(control, "PS_LOG", tmp_path / "logs" / "powershell.log")
+    assert run_powershell("Write-Host hi") == 4242
+
+    flags = seen["creationflags"]
+    assert not flags & subprocess.DETACHED_PROCESS
+    assert flags & subprocess.CREATE_NO_WINDOW
+    assert seen["stdout"] is not subprocess.DEVNULL and seen["stderr"] is not subprocess.DEVNULL
+    assert "Write-Host hi" in (tmp_path / "logs" / "powershell.log").read_text(encoding="utf-8")
+
+    # a console run keeps its window and writes to it, not to the log
+    run_powershell("Write-Host hi", console=True)
+    assert seen["creationflags"] & subprocess.CREATE_NEW_CONSOLE
+    assert seen["stdout"] is None
